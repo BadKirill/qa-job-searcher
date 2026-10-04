@@ -56,6 +56,10 @@ def test_responsibility_heading_variants(heading: str) -> None:
         "PreferredQualifications",
         "Minimum qualifications:",
         "Technical requirements",
+        "Nice to have",
+        "Nice-to-Have:",
+        "Хорошо, если есть",
+        "Будет плюсом",
     ],
 )
 def test_requirement_heading_variants(heading: str) -> None:
@@ -109,6 +113,13 @@ def test_stack_token_boundaries_and_no_inferred_qa_types() -> None:
         "Ready to apply?",
         "Equal Opportunity Employer",
         "Equal-opportunity statement",
+        "Culture & Benefits",
+        "Culture and Benefits",
+        "Hiring process",
+        "Recruitment process",
+        "Культура и преимущества",
+        "Этапы найма",
+        "Этапы отбора",
     ],
 )
 def test_offer_salary_company_and_application_sections_are_not_requirements(heading: str) -> None:

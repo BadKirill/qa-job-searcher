@@ -115,6 +115,23 @@ class PublicReader:
 
 
 class VacancyPage(HTMLParser):
+    void_tags = {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
+
     def __init__(self):
         super().__init__()
         self.depth = 0
@@ -128,7 +145,7 @@ class VacancyPage(HTMLParser):
         if tag == "script" and attr.get("id") == "__NUXT_DATA__":
             self.in_state = True
         if self.depth:
-            if tag not in {"br", "hr", "img", "input", "meta", "link"}:
+            if tag not in self.void_tags:
                 self.depth += 1
             if tag in {"script", "style"}:
                 self.hidden += 1
@@ -138,6 +155,8 @@ class VacancyPage(HTMLParser):
             self.depth = 1
 
     def handle_endtag(self, tag: str) -> None:
+        if tag in self.void_tags:
+            return
         if tag == "script":
             self.in_state = False
         if self.depth:

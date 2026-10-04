@@ -17,6 +17,7 @@ def extract_details(description: str, title: str = "") -> dict[str, list[str]]:
         r"обязанности|задачи|что (?:делать|предстоит делать))\s*[:：]?\s*$",
         "requirements": r"^(?:(?:(?:key|technical|essential)\s+)?requirements|"
         r"(?:(?:required|preferred|minimum|basic|essential|desired)\s*)?qualifications|"
+        r"nice[ -]to[ -]have|хорошо,? если есть|будет плюсом|"
         r"what (?:we(?:'re| are) looking for|you bring)|"
         r"требования|что (?:нужно|ожидаем)|навыки)\s*[:：]?\s*$",
     }
@@ -33,9 +34,12 @@ def extract_details(description: str, title: str = "") -> dict[str, list[str]]:
             current = heading
             continue
         if re.match(
-            r"^(?:(?:benefits|about (?:us|(?:the )?company)|we offer|what we offer|"
+            r"^(?:(?:benefits|culture(?:\s*(?:&|and)\s*benefits)?|"
+            r"hiring process|recruitment process|about (?:us|(?:the )?company)|"
+            r"we offer|what we offer|"
             r"compensation|salary|perks|(?:how to|ready to) apply|equal[ -]opportunity|"
-            r"условия|о компании|мы предлагаем)\b|apply(?: now| today)?\s*[:：]?\s*$)",
+            r"условия|культура и преимущества|этапы (?:найма|отбора)|"
+            r"о компании|мы предлагаем)\b|apply(?: now| today)?\s*[:：]?\s*$)",
             line,
             re.I,
         ):

@@ -210,6 +210,57 @@ def test_page_parser_and_bounded_metadata():
     assert history.saved_job(row(payload=None)) is None
 
 
+@pytest.mark.parametrize("tag", sorted(history.VacancyPage.void_tags))
+@pytest.mark.parametrize("ending", [">", "/>", " />"])
+def test_description_survives_void_elements_without_capturing_surroundings(tag, ending):
+    page = history.VacancyPage()
+    page.feed(
+        '<aside>Unrelated role</aside><div class="description"><strong>Published time</strong>:'
+        f" 2026-09-26<{tag}{ending}<section><p>Remote worldwide</p>"
+        f"<{tag}{ending}<p>Requirements: Python and API testing</p></section>"
+        '</div><div class="original-text-paywall">Locked text</div><p>Other vacancy</p>'
+    )
+    assert "Published time: 2026-09-26" in page.text
+    assert "Remote worldwide" in page.text
+    assert "Requirements: Python and API testing" in page.text
+    assert "Unrelated" not in page.text and "Locked" not in page.text
+    assert "Other vacancy" not in page.text
+
+
+def test_self_closing_nested_elements_and_void_end_tags_keep_description_boundaries():
+    page = history.VacancyPage()
+    page.feed(
+        '<div class="description"><div/>First<br/></br><span/>Second'
+        "<script/>Third<style/>Fourth<img/></img>Fifth</div>"
+        '<p>Outside</p><script id="__NUXT_DATA__">["hidden"]</script>'
+    )
+    assert page.text == "First\nSecondThirdFourthFifth"
+    assert "".join(page.state_parts) == '["hidden"]'
+
+
+@pytest.mark.parametrize("length,accepted", [(79, False), (80, True), (81, True)])
+def test_full_description_length_after_self_closing_break(length, accepted):
+    prefix = "Published time: 2026-09-26\n"
+    description = prefix + "x" * (length - len(prefix))
+    body = '<div class="description">' + description.replace("\n", "<br />") + "</div>"
+    state_tag = '<script id="__NUXT_DATA__">'
+    html = body + state_tag + html_page().split(state_tag, 1)[1]
+    if accepted:
+        value, _ = history.hirify_job(html, row())
+        assert value.description == description and len(value.description) == length
+    else:
+        with pytest.raises(history.ImportFailure, match="Full public description"):
+            history.hirify_job(html, row())
+
+
+def test_hidden_metadata_and_paywall_do_not_replace_missing_public_description():
+    html = html_page(description=DESCRIPTION).replace(
+        'class="description"', 'class="original-text-paywall"'
+    )
+    with pytest.raises(history.ImportFailure, match="Full public description"):
+        history.hirify_job(html, row())
+
+
 async def test_restore_source_integrations():
     value, method, status = await history.restore_job(row(), Reader(html_page()))
     assert value.source == "Hirify" and method == "hirify_public_page"

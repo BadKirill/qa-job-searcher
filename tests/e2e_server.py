@@ -7,7 +7,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import uvicorn
-from docx import Document
 
 from qa_job_bot.agent_gateway import AgentUnavailable
 from qa_job_bot.document_policy import content_hash
@@ -88,19 +87,7 @@ def seed_jobs(store):
     return jobs
 
 
-def fixture_template():
-    path = Path(__file__).parent / "fixtures" / "candidate.docx"
-    path.parent.mkdir(exist_ok=True)
-    document = Document()
-    document.add_paragraph("Alex Example")
-    document.add_paragraph("QA Engineer at Example Labs from 2020 to 2024.")
-    document.add_paragraph("Experienced with Python, manual testing and test automation.")
-    document.save(path)
-    return path
-
-
 def main():
-    fixture_template()
     with tempfile.TemporaryDirectory(prefix="qa-web-e2e-") as temporary:
         settings = WebSettings(
             Path(temporary),
