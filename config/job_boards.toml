@@ -1,0 +1,139 @@
+# Direct company career pages. Add more blocks using the board identifier from its URL.
+# Greenhouse example: https://job-boards.greenhouse.io/workwize -> token = "workwize"
+# Ashby example: https://jobs.ashbyhq.com/Lendable -> token = "Lendable"
+# Lever example: https://jobs.lever.co/company -> token = "company"
+
+[[greenhouse]]
+name = "Workwize"
+token = "workwize"
+tags = ["saas", "europe"]
+
+[[greenhouse]]
+name = "Remote People"
+token = "remotepeople"
+tags = ["saas", "remote"]
+
+[[greenhouse]]
+name = "Xebia CEE"
+token = "xebiacee"
+tags = ["ai", "qa consulting", "europe"]
+
+[[greenhouse]]
+name = "Focal Systems"
+token = "focalsystems"
+tags = ["ai", "saas", "europe"]
+
+[[greenhouse]]
+name = "Coinbase"
+token = "coinbase"
+tags = ["crypto", "digital assets", "fintech"]
+
+[[greenhouse]]
+name = "Fireblocks"
+token = "fireblocks"
+tags = ["crypto", "digital assets", "fintech"]
+
+[[greenhouse]]
+name = "Anthropic"
+token = "anthropic"
+tags = ["ai", "generative ai"]
+
+[[greenhouse]]
+name = "Stripe"
+token = "stripe"
+tags = ["fintech", "payments"]
+
+[[greenhouse]]
+name = "Ripple"
+token = "ripple"
+tags = ["crypto", "digital assets", "fintech"]
+
+[[greenhouse]]
+name = "Bitpanda"
+token = "bitpanda"
+tags = ["crypto", "digital assets", "fintech", "europe"]
+
+[[greenhouse]]
+name = "SumUp"
+token = "sumup"
+tags = ["fintech", "payments", "europe"]
+
+[[greenhouse]]
+name = "Consensys"
+token = "consensys"
+tags = ["crypto", "web3", "blockchain"]
+
+[[greenhouse]]
+name = "Wise"
+token = "wise"
+tags = ["fintech", "payments", "europe"]
+
+[[greenhouse]]
+name = "N26"
+token = "n26"
+tags = ["fintech", "europe"]
+
+[[ashby]]
+name = "Lendable"
+token = "Lendable"
+tags = ["fintech", "ai", "europe"]
+
+[[ashby]]
+name = "Solidgate"
+token = "solidgate"
+tags = ["fintech", "payments", "europe"]
+
+[[ashby]]
+name = "Ramp"
+token = "ramp"
+tags = ["fintech", "ai"]
+
+[[ashby]]
+name = "Sardine"
+token = "sardine"
+tags = ["fintech", "ai"]
+
+[[ashby]]
+name = "ElevenLabs"
+token = "ElevenLabs"
+tags = ["ai", "generative ai"]
+
+[[ashby]]
+name = "Perplexity"
+token = "perplexity"
+tags = ["ai", "generative ai"]
+
+[[ashby]]
+name = "Replit"
+token = "replit"
+tags = ["ai", "saas"]
+
+[[ashby]]
+name = "Notion"
+token = "notion"
+tags = ["saas", "ai"]
+
+[[ashby]]
+name = "Linear"
+token = "linear"
+tags = ["saas"]
+
+[[lever]]
+name = "TTEC Digital"
+token = "ttecdigital"
+tags = ["ai", "qa consulting"]
+
+[[lever]]
+name = "Caseware"
+token = "caseware"
+tags = ["fintech", "saas"]
+
+[[lever]]
+name = "StarCompliance"
+token = "starcompliance"
+tags = ["fintech", "saas"]
+
+[[lever]]
+name = "Skydance"
+token = "skydance"
+tags = ["ai", "gaming"]

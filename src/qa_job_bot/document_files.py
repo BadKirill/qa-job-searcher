@@ -1,0 +1,310 @@
+import io
+import json
+import os
+import re
+import resource
+import subprocess
+import sys
+import zipfile
+from pathlib import Path, PurePosixPath
+from xml.etree import ElementTree
+from xml.sax.saxutils import escape
+
+from docx import Document
+from docx.shared import Pt, RGBColor
+from pypdf import PdfReader, apply_configuration
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+
+from qa_job_bot.document_policy import Draft, canonical_text
+
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+MAX_UNCOMPRESSED_BYTES = 30 * 1024 * 1024
+MAX_PAGES = 20
+MAX_TEXT = 100_000
+W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+FONT_CANDIDATES = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/Library/Fonts/Arial Unicode.ttf",
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+)
+
+
+class DocumentFileError(ValueError):
+    pass
+
+
+def _xml(payload: bytes) -> ElementTree.Element:
+    if b"<!DOCTYPE" in payload or b"<!ENTITY" in payload:
+        raise DocumentFileError("XML entities are not permitted")
+    return ElementTree.fromstring(payload)
+
+
+def _docx(content: bytes) -> tuple[str, dict]:
+    with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        entries = archive.infolist()
+        if len(entries) > 250 or sum(item.file_size for item in entries) > MAX_UNCOMPRESSED_BYTES:
+            raise DocumentFileError("DOCX archive exceeds safe limits")
+        for item in entries:
+            name = PurePosixPath(item.filename)
+            if name.is_absolute() or ".." in name.parts or "\\" in item.filename:
+                raise DocumentFileError("Invalid archive path")
+            if item.flag_bits & 1 or item.file_size > 10_000_000:
+                raise DocumentFileError("Encrypted or oversized archive entry")
+            if any(
+                word in item.filename.lower() for word in ("vbaproject", "embeddings/", "activex")
+            ):
+                raise DocumentFileError("Active DOCX content is not permitted")
+            if item.filename.endswith((".xml", ".rels")):
+                node = _xml(archive.read(item))
+                for element in node.iter():
+                    tag = element.tag.rsplit("}", 1)[-1]
+                    if tag in {"vanish", "webHidden", "instrText", "altChunk", "object"}:
+                        raise DocumentFileError(
+                            "Hidden or executable DOCX content is not permitted"
+                        )
+                    if element.get("TargetMode") == "External":
+                        if not element.get("Type", "").endswith("/hyperlink"):
+                            raise DocumentFileError("External DOCX resources are not permitted")
+                        if not re.match(r"^(https?://|mailto:)", element.get("Target", "")):
+                            raise DocumentFileError("Unsafe hyperlink")
+        root = _xml(archive.read("word/document.xml"))
+        paragraphs = [
+            "".join(
+                "\n" if node.tag == f"{W}br" else (node.text or "")
+                for node in paragraph.iter()
+                if node.tag in {f"{W}t", f"{W}br"}
+            )
+            for paragraph in root.iter(f"{W}p")
+        ]
+        document = Document(io.BytesIO(content))
+        section = document.sections[0]
+        normal = document.styles["Normal"].font
+        style = {
+            "font_name": normal.name or "Arial",
+            "font_size": float(normal.size.pt) if normal.size else 11.0,
+            "page_width": float(section.page_width.pt),
+            "page_height": float(section.page_height.pt),
+            "margin_top": float(section.top_margin.pt),
+            "margin_bottom": float(section.bottom_margin.pt),
+            "margin_left": float(section.left_margin.pt),
+            "margin_right": float(section.right_margin.pt),
+            "source_format": "docx",
+            "layout_fidelity": "typography_and_page_geometry",
+        }
+        return "\n".join(line for line in paragraphs if line.strip()), style
+
+
+def _pdf(content: bytes) -> tuple[str, dict]:
+    with apply_configuration(
+        maximum_declared_stream_length=MAX_UNCOMPRESSED_BYTES,
+        zlib_maximum_output_length=MAX_UNCOMPRESSED_BYTES,
+        lzw_maximum_output_length=MAX_UNCOMPRESSED_BYTES,
+        run_length_maximum_output_length=MAX_UNCOMPRESSED_BYTES,
+        array_based_stream_maximum_output_length=MAX_UNCOMPRESSED_BYTES,
+        jbig2dec_binary=None,
+    ):
+        return _pdf_extract(content)
+
+
+def _pdf_extract(content: bytes) -> tuple[str, dict]:
+    reader = PdfReader(io.BytesIO(content), strict=True)
+    if reader.is_encrypted or len(reader.pages) > MAX_PAGES:
+        raise DocumentFileError("Encrypted PDF or page limit exceeded")
+    forbidden = {"/JavaScript", "/JS", "/Launch", "/OpenAction", "/AA", "/EmbeddedFiles", "/XFA"}
+    seen = set()
+    pending = [reader.trailer]
+    while pending:
+        current = pending.pop().get_object()
+        identity = id(current)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        if len(seen) > 100_000:
+            raise DocumentFileError("PDF object limit exceeded")
+        if isinstance(current, dict):
+            if forbidden.intersection(current):
+                raise DocumentFileError("Active PDF content is not permitted")
+            pending.extend(current.values())
+        elif isinstance(current, list):
+            pending.extend(current)
+    paragraphs = []
+    for page in reader.pages:
+        stream = page.get_contents()
+        if stream is not None and len(stream.get_data()) > MAX_UNCOMPRESSED_BYTES:
+            raise DocumentFileError("PDF stream limit exceeded")
+        paragraphs.append(page.extract_text() or "")
+    return "\n".join(paragraphs), {
+        "source_format": "pdf",
+        "layout_fidelity": "text_only",
+        "font_name": "Arial",
+        "font_size": 11.0,
+    }
+
+
+def _parse_template(content: bytes, filename: str) -> dict:
+    if not content or len(content) > MAX_UPLOAD_BYTES:
+        raise DocumentFileError("File is empty or exceeds 10 MiB")
+    extension = Path(filename).suffix.casefold()
+    try:
+        if extension == ".docx" and content.startswith(b"PK"):
+            text, style = _docx(content)
+        elif extension == ".pdf" and content.startswith(b"%PDF-"):
+            text, style = _pdf(content)
+        else:
+            raise DocumentFileError("Upload a valid DOCX or PDF file")
+    except DocumentFileError:
+        raise
+    except Exception as error:
+        raise DocumentFileError("Document could not be parsed safely") from error
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines or len(text) > MAX_TEXT or len(lines) > 500:
+        raise DocumentFileError("Document is empty or has too much text")
+    return {
+        "extracted_text": "\n".join(lines),
+        "facts": [
+            {"id": f"fact-{index}", "text": line, "source": f"paragraph:{index}"}
+            for index, line in enumerate(lines, 1)
+        ],
+        "style": style,
+    }
+
+
+def _geometry(style: dict) -> dict[str, float]:
+    defaults = {
+        "font_size": 11,
+        "page_width": 595.28,
+        "page_height": 841.89,
+        "margin_top": 48,
+        "margin_bottom": 48,
+        "margin_left": 48,
+        "margin_right": 48,
+    }
+    result = {}
+    for key, default in defaults.items():
+        value = float(style.get(key, default))
+        lower, upper = (
+            (9, 16)
+            if key == "font_size"
+            else ((400, 1000) if key.startswith("page") else (24, 110))
+        )
+        if not lower <= value <= upper:
+            raise DocumentFileError("Unsupported template page geometry")
+        result[key] = value
+    return result
+
+
+def _pdf_font() -> str:
+    for candidate in FONT_CANDIDATES:
+        if Path(candidate).is_file():
+            pdfmetrics.registerFont(TTFont("CandidateUnicode", candidate))
+            return "CandidateUnicode"
+    raise DocumentFileError("A Unicode PDF font is required")
+
+
+def render_documents(draft: dict, template: dict, output_dir: Path) -> list[dict]:
+    draft = Draft.model_validate(draft).model_dump()
+    output_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    geometry = _geometry(template.get("style", {}))
+    document = Document()
+    section = document.sections[0]
+    for key, value in geometry.items():
+        if key.startswith("page"):
+            setattr(section, key, Pt(value))
+        elif key.startswith("margin_"):
+            setattr(section, key.removeprefix("margin_") + "_margin", Pt(value))
+    font_name = template.get("style", {}).get("font_name", "Arial")
+    for name in ("Normal", "Title", "Heading 1"):
+        font = document.styles[name].font
+        font.name = font_name
+        font.color.rgb = RGBColor(0, 0, 0)
+    document.styles["Normal"].font.size = Pt(geometry["font_size"])
+    document.styles["Title"].font.size = Pt(22)
+    for border in document.styles["Title"].element.xpath(".//w:pBdr"):
+        border.getparent().remove(border)
+    document.styles["Heading 1"].font.size = Pt(13)
+    document.add_paragraph(draft["title"], style="Title")
+    pdf_font = _pdf_font()
+    body = ParagraphStyle(
+        "Body", fontName=pdf_font, fontSize=geometry["font_size"], leading=16, spaceAfter=9
+    )
+    heading = ParagraphStyle(
+        "Section", parent=body, fontSize=13, leading=18, spaceBefore=12, keepWithNext=True
+    )
+    title = ParagraphStyle("Title", parent=body, fontSize=22, leading=27, spaceAfter=17)
+    story = [Paragraph(escape(draft["title"]), title)]
+    for item in draft["sections"]:
+        if item["heading"]:
+            document.add_paragraph(item["heading"], style="Heading 1")
+            story.append(Paragraph(escape(item["heading"]), heading))
+        for paragraph in item["paragraphs"]:
+            document.add_paragraph(paragraph["text"])
+            story.append(Paragraph(escape(paragraph["text"]).replace("\n", "<br/>"), body))
+    story.append(Spacer(1, 1))
+    docx_path, pdf_path = output_dir / "document.docx", output_dir / "document.pdf"
+    document.core_properties.author = ""
+    document.core_properties.last_modified_by = ""
+    document.save(docx_path)
+    pdf = SimpleDocTemplate(
+        str(pdf_path),
+        pagesize=(geometry["page_width"], geometry["page_height"]),
+        topMargin=geometry["margin_top"],
+        bottomMargin=geometry["margin_bottom"],
+        leftMargin=geometry["margin_left"],
+        rightMargin=geometry["margin_right"],
+        title=draft["title"],
+        author="",
+    )
+    pdf.build(story)
+    expected = " ".join(canonical_text(draft).split())
+    docx_text = " ".join("\n".join(p.text for p in Document(docx_path).paragraphs).split())
+    pdf_text = " ".join("\n".join(p.extract_text() for p in PdfReader(pdf_path).pages).split())
+    if docx_text != expected or pdf_text != expected:
+        raise DocumentFileError("Rendered text differs from the approved document")
+    for path in (docx_path, pdf_path):
+        path.chmod(0o600)
+    return [
+        {"path": path, "format": path.suffix[1:], "filename": path.name}
+        for path in (docx_path, pdf_path)
+    ]
+
+
+def parse_template(content: bytes, filename: str) -> dict:
+    if not content or len(content) > MAX_UPLOAD_BYTES:
+        raise DocumentFileError("File is empty or exceeds 10 MiB")
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "qa_job_bot.document_files", Path(filename).suffix.lower()],
+            input=content,
+            capture_output=True,
+            timeout=15,
+            check=False,
+            cwd="/tmp",
+            env={
+                "PATH": os.defpath,
+                "PYTHONPATH": str(Path(__file__).resolve().parent.parent),
+            },
+        )
+        payload = json.loads(result.stdout)
+        if result.returncode or "error" in payload:
+            raise DocumentFileError(payload.get("error", "Document parser failed"))
+        return payload
+    except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError) as error:
+        raise DocumentFileError("Document parser failed or exceeded resource limits") from error
+
+
+def main() -> None:
+    resource.setrlimit(resource.RLIMIT_CPU, (10, 10))
+    resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
+    try:
+        content = sys.stdin.buffer.read(MAX_UPLOAD_BYTES + 1)
+        result = _parse_template(content, "template" + sys.argv[1])
+    except (DocumentFileError, IndexError) as error:
+        result = {"error": str(error)}
+    sys.stdout.write(json.dumps(result, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()

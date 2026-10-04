@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qa-job-searcher"
+version = "0.1.0"
+description = "Personal Telegram bot that finds remote QA jobs"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "httpx>=0.27,<1",
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.30,<1",
+  "python-multipart>=0.0.18,<1",
+  "mcp>=1.30,<2",
+  "python-docx>=1.1,<2",
+  "reportlab>=4,<5",
+  "pypdf>=6.19,<7",
+  "openai-codex==0.160.0",
+  "cryptography<49",
+  "langdetect==1.0.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6", "pytest-cov>=6,<8"]
+
+[project.scripts]
+qa-job-bot = "qa_job_bot.main:main"
+qa-job-web = "qa_job_bot.web:main"
+qa-job-worker = "qa_job_bot.worker:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+branch = true
+source = ["src/qa_job_bot"]
+
+[tool.coverage.report]
+show_missing = true
+precision = 2
+fail_under = 90
+exclude_lines = []
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
