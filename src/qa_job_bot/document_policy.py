@@ -20,11 +20,12 @@ class StrictModel(BaseModel):
 class Paragraph(StrictModel):
     text: Text
     fact_ids: Annotated[list[Identifier], Field(min_length=1, max_length=30)]
+    kind: Literal["body", "bullet", "entry", "role", "contact"] = "body"
 
 
 class Section(StrictModel):
     heading: Annotated[str, Field(max_length=120, strict=True)]
-    paragraphs: Annotated[list[Paragraph], Field(min_length=1, max_length=40)]
+    paragraphs: Annotated[list[Paragraph], Field(min_length=1, max_length=200)]
 
 
 class Draft(StrictModel):
@@ -38,6 +39,14 @@ class Review(StrictModel):
     issues: Annotated[list[Text], Field(max_length=100)]
     draft_hash: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
     checked_fact_ids: Annotated[list[Identifier], Field(max_length=500)]
+
+
+class VisualReview(StrictModel):
+    verdict: Literal["pass", "revise"]
+    issues: Annotated[list[Text], Field(max_length=100)]
+    template_sha256: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
+    rendered_sha256: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
+    draft_hash: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
 
 
 def content_hash(value: dict) -> str:
@@ -64,7 +73,7 @@ def _safe_text(text: str) -> None:
 
 def validate_draft(draft: dict, context: dict) -> dict:
     try:
-        result = Draft.model_validate(draft).model_dump()
+        result = Draft.model_validate(draft).model_dump(exclude_defaults=True)
     except ValidationError as error:
         raise PolicyViolation("Invalid document structure") from error
     template = context.get("template") or {}
@@ -99,6 +108,24 @@ def validate_draft(draft: dict, context: dict) -> dict:
                 re.findall(contacts, evidence)
             ):
                 raise PolicyViolation("Document contains unsupported contact information")
+    return result
+
+
+def validate_visual_review(
+    review: dict, draft: dict, template_reference: dict, rendered_reference: dict
+) -> dict:
+    try:
+        result = VisualReview.model_validate(review).model_dump()
+    except ValidationError as error:
+        raise PolicyViolation("Invalid visual review") from error
+    if (
+        result["template_sha256"] != template_reference["sha256"]
+        or result["rendered_sha256"] != rendered_reference["sha256"]
+        or result["draft_hash"] != content_hash(draft)
+    ):
+        raise PolicyViolation("Visual review belongs to different files")
+    if result["verdict"] != "pass" or result["issues"]:
+        raise PolicyViolation("Проверка оформления не пройдена: " + "; ".join(result["issues"]))
     return result
 
 

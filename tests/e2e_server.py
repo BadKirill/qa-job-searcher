@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import sys
 import tempfile
 from contextlib import asynccontextmanager
@@ -44,6 +45,23 @@ class FixtureGateway:
             "issues": ["Неподтверждённый опыт"] if blocked else [],
             "draft_hash": content_hash(draft),
             "checked_fact_ids": [fact["id"] for fact in context["template"]["facts"]],
+        }
+
+    async def visual_review(self, context, draft, rendered_reference):
+        reference = context["template"]["reference"]
+        for visual in [reference, rendered_reference]:
+            assert visual["pages"]
+            assert all(
+                base64.b64decode(page["image_base64"]).startswith(b"\x89PNG\r\n\x1a\n")
+                for page in visual["pages"]
+            )
+        blocked = context["job"].get("title") == "Senior QA Engineer 06"
+        return {
+            "verdict": "revise" if blocked else "pass",
+            "issues": ["Неверные отступы в сформированном CV"] if blocked else [],
+            "template_sha256": reference["sha256"],
+            "rendered_sha256": rendered_reference["sha256"],
+            "draft_hash": content_hash(draft),
         }
 
     async def chat(self, context, messages):

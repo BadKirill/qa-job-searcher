@@ -13,7 +13,7 @@ from pypdf import PdfReader
 
 from qa_job_bot import worker as worker_module
 from qa_job_bot.agent_gateway import AgentUnavailable
-from qa_job_bot.document_files import DocumentFileError
+from qa_job_bot.document_files import DocumentFileError, parse_template
 from qa_job_bot.document_policy import PolicyViolation, canonical_text, content_hash
 from qa_job_bot.models import FetchReport, Job
 from qa_job_bot.web_security import WebSettings
@@ -90,6 +90,121 @@ def enqueue_document(worker: Worker, kind: str = "cv", description: str = ENGLIS
         },
     }
     return worker.store.enqueue(kind, "document", {"context": context}, "request")
+
+
+def enqueue_pdf(worker, legacy=False):
+    template = parse_template(
+        (Path(__file__).parent / "fixtures/candidate.pdf").read_bytes(), "candidate.pdf"
+    )
+    template.update(
+        {
+            "version": "pdf-1",
+            "facts": [
+                {
+                    "id": "fact-1",
+                    "confirmed": True,
+                    "text": "I test software applications and APIs.",
+                }
+            ],
+        }
+    )
+    if legacy:
+        template.pop("reference")
+    context = {"owner_id": "owner", "job": {"description": ENGLISH_JOB}, "template": template}
+    return worker.store.enqueue("cv", "pdf", {"context": context}, "pdf-request")
+
+
+def visual_result(context, draft, rendered):
+    return {
+        "verdict": "pass",
+        "issues": [],
+        "draft_hash": content_hash(draft),
+        "template_sha256": context["template"]["reference"]["sha256"],
+        "rendered_sha256": rendered["sha256"],
+    }
+
+
+async def test_legacy_pdf_requires_reread_without_calling_agent(worker):
+    task = enqueue_pdf(worker, legacy=True)
+    await worker.once()
+    result = worker.store.task(task["id"])
+    assert result["status"] == "blocked" and "Перечитайте PDF" in result["error"]
+    assert result["artifacts"] == []
+    worker.gateway.generate.assert_not_awaited()
+
+
+async def test_pdf_files_require_visual_review_of_actual_rendered_pages(worker):
+    task = enqueue_pdf(worker)
+
+    async def visual(context, draft, rendered):
+        assert rendered["pages"][0]["image_base64"]
+        assert context["template"]["reference"]["pages"][1]["image_base64"]
+        worker.gateway.last_run_metadata = {"thread_id": "visual-session"}
+        return visual_result(context, draft, rendered)
+
+    worker.gateway.visual_review = AsyncMock(side_effect=visual)
+    await worker.once()
+    result = worker.store.task(task["id"])
+    assert result["status"] == "ready", result["error"]
+    worker.gateway.visual_review.assert_awaited_once()
+    assert result["result"]["visual_reviewer"] == {"thread_id": "visual-session"}
+    pdf = next(worker.store.artifact(a["id"]) for a in result["artifacts"] if a["format"] == "pdf")
+    assert result["result"]["visual_review"]["rendered_sha256"] == pdf["sha256"]
+
+
+@pytest.mark.parametrize(
+    "outcome,status",
+    [
+        ("reject", "blocked"),
+        ("invalid", "blocked"),
+        ("unavailable", "failed"),
+        ("timeout", "failed"),
+        ("cancel", "cancelled"),
+    ],
+)
+async def test_visual_review_failure_and_cancellation_never_register_artifacts(
+    worker, outcome, status
+):
+    task = enqueue_pdf(worker)
+
+    async def visual(context, draft, rendered):
+        if outcome == "unavailable":
+            raise AgentUnavailable("private error")
+        if outcome == "timeout":
+            raise TimeoutError
+        if outcome == "invalid":
+            return {"approved": True}
+        if outcome == "cancel":
+            worker.store.cancel_task(task["id"])
+        result = visual_result(context, draft, rendered)
+        if outcome == "reject":
+            result.update(verdict="revise", issues=["Clipped content"])
+        return result
+
+    worker.gateway.visual_review = AsyncMock(side_effect=visual)
+    await worker.once()
+    result = worker.store.task(task["id"])
+    assert result["status"] == status, result["error"]
+    assert result["artifacts"] == [] and not result["result"]
+    with worker.store._connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM web_artifacts").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("extension", ["pdf", "docx"])
+async def test_files_changed_during_visual_review_never_register(worker, extension):
+    task = enqueue_pdf(worker)
+
+    async def visual(context, draft, rendered):
+        path = worker.settings.data_dir / "artifacts" / task["id"] / ("document." + extension)
+        path.write_bytes(path.read_bytes() + b"changed")
+        return visual_result(context, draft, rendered)
+
+    worker.gateway.visual_review = AsyncMock(side_effect=visual)
+    await worker.once()
+    result = worker.store.task(task["id"])
+    assert result["status"] == "blocked" and "изменился" in result["error"]
+    with worker.store._connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM web_artifacts").fetchone()[0] == 0
 
 
 @pytest.mark.parametrize("description,expected", [(ENGLISH_JOB, "en"), (RUSSIAN_JOB, "ru")])

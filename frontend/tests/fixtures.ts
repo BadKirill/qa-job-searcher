@@ -16,6 +16,30 @@ export const template: Template = {
   extracted_text: "Five years of API testing experience.",
 };
 
+export function pdfTemplate(overrides: Partial<Template> = {}): Template {
+  return {
+    ...structuredClone(template),
+    id: "pdf-template",
+    filename: "Candidate.pdf",
+    reference: { sha256: "a".repeat(64), page_count: 2 },
+    facts: [
+      {
+        id: "pdf-fact-1",
+        text: "Alex Example",
+        source: "page:1:block:1",
+        kind: "title",
+      },
+      {
+        id: "pdf-fact-2",
+        text: "Five years of API testing experience.",
+        source: "page:2:block:1",
+        kind: "body",
+      },
+    ],
+    ...overrides,
+  };
+}
+
 export function makeJob(id = "job-1", overrides: Partial<Job> = {}): Job {
   return {
     id,
@@ -159,9 +183,21 @@ export function server() {
       data = task;
     } else if (path === "/template-drafts") {
       const draft = {
-        ...structuredClone(template),
+        ...(/\.pdf$/i.test((body.get("file") as File).name)
+          ? pdfTemplate()
+          : structuredClone(template)),
         filename: (body.get("file") as File).name,
       };
+      state.profile.drafts.push(draft);
+      data = draft;
+    } else if (path.endsWith("/reparse")) {
+      const original = [state.profile.active, ...state.profile.drafts].find(
+        (item) => item?.id === path.split("/")[2],
+      )!;
+      const draft = pdfTemplate({
+        id: `${original.id}-reparsed`,
+        filename: original.filename,
+      });
       state.profile.drafts.push(draft);
       data = draft;
     } else if (path.endsWith("/activate")) {

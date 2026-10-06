@@ -11,14 +11,17 @@ from xml.etree import ElementTree
 from xml.sax.saxutils import escape
 
 from docx import Document
-from docx.shared import Pt, RGBColor
+from docx.enum.style import WD_STYLE_TYPE
+from docx.shared import Pt
 from pypdf import PdfReader, apply_configuration
-from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.colors import HexColor
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+from reportlab.platypus import BaseDocTemplate, Frame, HRFlowable, PageTemplate, Paragraph, Spacer
 
+from qa_job_bot.document_layout import docx_rule, docx_style, pdf_style, typography
 from qa_job_bot.document_policy import Draft, canonical_text
+from qa_job_bot.pdf_template import PdfTemplateError, extract_pdf_template
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 30 * 1024 * 1024
@@ -97,7 +100,7 @@ def _docx(content: bytes) -> tuple[str, dict]:
         return "\n".join(line for line in paragraphs if line.strip()), style
 
 
-def _pdf(content: bytes) -> tuple[str, dict]:
+def _pdf(content: bytes) -> dict:
     with apply_configuration(
         maximum_declared_stream_length=MAX_UNCOMPRESSED_BYTES,
         zlib_maximum_output_length=MAX_UNCOMPRESSED_BYTES,
@@ -109,12 +112,13 @@ def _pdf(content: bytes) -> tuple[str, dict]:
         return _pdf_extract(content)
 
 
-def _pdf_extract(content: bytes) -> tuple[str, dict]:
+def _pdf_extract(content: bytes) -> dict:
     reader = PdfReader(io.BytesIO(content), strict=True)
     if reader.is_encrypted or len(reader.pages) > MAX_PAGES:
         raise DocumentFileError("Encrypted PDF or page limit exceeded")
     forbidden = {"/JavaScript", "/JS", "/Launch", "/OpenAction", "/AA", "/EmbeddedFiles", "/XFA"}
     seen = set()
+    image_pixels = 0
     pending = [reader.trailer]
     while pending:
         current = pending.pop().get_object()
@@ -127,21 +131,26 @@ def _pdf_extract(content: bytes) -> tuple[str, dict]:
         if isinstance(current, dict):
             if forbidden.intersection(current):
                 raise DocumentFileError("Active PDF content is not permitted")
+            if current.get("/Subtype") == "/Image":
+                width, height = current.get("/Width"), current.get("/Height")
+                if not all(
+                    isinstance(value, int) and 0 < value <= 30_000_000 for value in (width, height)
+                ):
+                    raise DocumentFileError("Invalid PDF image dimensions")
+                image_pixels += width * height
+                if image_pixels > 30_000_000:
+                    raise DocumentFileError("PDF source image pixel limit exceeded")
             pending.extend(current.values())
         elif isinstance(current, list):
             pending.extend(current)
-    paragraphs = []
     for page in reader.pages:
         stream = page.get_contents()
         if stream is not None and len(stream.get_data()) > MAX_UNCOMPRESSED_BYTES:
             raise DocumentFileError("PDF stream limit exceeded")
-        paragraphs.append(page.extract_text() or "")
-    return "\n".join(paragraphs), {
-        "source_format": "pdf",
-        "layout_fidelity": "text_only",
-        "font_name": "Arial",
-        "font_size": 11.0,
-    }
+    try:
+        return extract_pdf_template(content, max_pages=MAX_PAGES, max_text=MAX_TEXT)
+    except PdfTemplateError as error:
+        raise DocumentFileError(str(error)) from error
 
 
 def _parse_template(content: bytes, filename: str) -> dict:
@@ -152,7 +161,7 @@ def _parse_template(content: bytes, filename: str) -> dict:
         if extension == ".docx" and content.startswith(b"PK"):
             text, style = _docx(content)
         elif extension == ".pdf" and content.startswith(b"%PDF-"):
-            text, style = _pdf(content)
+            return _pdf(content)
         else:
             raise DocumentFileError("Upload a valid DOCX or PDF file")
     except DocumentFileError:
@@ -186,7 +195,7 @@ def _geometry(style: dict) -> dict[str, float]:
     for key, default in defaults.items():
         value = float(style.get(key, default))
         lower, upper = (
-            (9, 16)
+            (7, 24)
             if key == "font_size"
             else ((400, 1000) if key.startswith("page") else (24, 110))
         )
@@ -215,39 +224,89 @@ def render_documents(draft: dict, template: dict, output_dir: Path) -> list[dict
             setattr(section, key, Pt(value))
         elif key.startswith("margin_"):
             setattr(section, key.removeprefix("margin_") + "_margin", Pt(value))
-    font_name = template.get("style", {}).get("font_name", "Arial")
-    for name in ("Normal", "Title", "Heading 1"):
-        font = document.styles[name].font
-        font.name = font_name
-        font.color.rgb = RGBColor(0, 0, 0)
-    document.styles["Normal"].font.size = Pt(geometry["font_size"])
-    document.styles["Title"].font.size = Pt(22)
+    try:
+        roles = typography(template.get("style", {}), geometry)
+    except (ValueError, TypeError, KeyError) as error:
+        raise DocumentFileError("Unsupported template typography") from error
+    names = {"body": "Normal", "title": "Title", "heading": "Heading 1"}
+    for role, spec in roles.items():
+        name = names.setdefault(role, "CV " + role)
+        if name not in document.styles:
+            document.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
+        docx_style(document.styles[name], spec)
     for border in document.styles["Title"].element.xpath(".//w:pBdr"):
         border.getparent().remove(border)
-    document.styles["Heading 1"].font.size = Pt(13)
     document.add_paragraph(draft["title"], style="Title")
     pdf_font = _pdf_font()
-    body = ParagraphStyle(
-        "Body", fontName=pdf_font, fontSize=geometry["font_size"], leading=16, spaceAfter=9
-    )
-    heading = ParagraphStyle(
-        "Section", parent=body, fontSize=13, leading=18, spaceBefore=12, keepWithNext=True
-    )
-    title = ParagraphStyle("Title", parent=body, fontSize=22, leading=27, spaceAfter=17)
-    story = [Paragraph(escape(draft["title"]), title)]
+    styles = {
+        role: pdf_style(role, spec, pdf_font, canonical_text(draft)) for role, spec in roles.items()
+    }
+    styles["bullet"] = pdf_style("bullet", roles["body"], pdf_font, canonical_text(draft))
+    styles["bullet"].leftIndent = geometry["font_size"] * 1.4
+    styles["bullet"].firstLineIndent = -geometry["font_size"]
+    story = [Paragraph(escape(draft["title"]), styles["title"])]
     for item in draft["sections"]:
         if item["heading"]:
-            document.add_paragraph(item["heading"], style="Heading 1")
-            story.append(Paragraph(escape(item["heading"]), heading))
+            section_heading = document.add_paragraph(item["heading"], style="Heading 1")
+            story.append(Paragraph(escape(item["heading"]), styles["heading"]))
+            if rule := roles["heading"].get("rule"):
+                docx_rule(section_heading, rule)
+                line = HRFlowable(
+                    width="100%",
+                    thickness=rule["width"],
+                    color=HexColor(rule["color"]),
+                    spaceAfter=3,
+                )
+                line.keepWithNext = True
+                story.append(line)
         for paragraph in item["paragraphs"]:
-            document.add_paragraph(paragraph["text"])
-            story.append(Paragraph(escape(paragraph["text"]).replace("\n", "<br/>"), body))
+            kind = paragraph.get("kind", "body")
+            role = {"contact": "header", "role": "italic", "bullet": "body"}.get(kind, kind)
+            text = paragraph["text"]
+            name = names[role]
+            appearance = template.get("style", {}).get("paragraph_typography", {})
+            override = (
+                appearance.get(paragraph["fact_ids"][0])
+                if len(paragraph["fact_ids"]) == 1
+                else None
+            )
+            paragraph_style = styles["bullet" if kind == "bullet" else role]
+            if override:
+                try:
+                    spec = typography({"typography": {role: roles[role] | override}}, geometry)[
+                        role
+                    ]
+                except (ValueError, TypeError, KeyError) as error:
+                    raise DocumentFileError("Unsupported paragraph typography") from error
+                name = "CV paragraph " + str(len(document.paragraphs))
+                custom = document.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
+                custom.base_style = document.styles[names[role]]
+                docx_style(custom, spec)
+                paragraph_style = pdf_style(role, spec, pdf_font, text)
+                paragraph_style.leftIndent = styles[
+                    "bullet" if kind == "bullet" else role
+                ].leftIndent
+                paragraph_style.firstLineIndent = styles[
+                    "bullet" if kind == "bullet" else role
+                ].firstLineIndent
+            block = document.add_paragraph(text, style=name)
+            if kind == "bullet":
+                block.paragraph_format.left_indent = Pt(geometry["font_size"] * 1.4)
+                block.paragraph_format.first_line_indent = Pt(-geometry["font_size"])
+            story.append(
+                Paragraph(
+                    escape(text)
+                    .replace("\n", "<br/>")
+                    .replace("•", f'<font name="{pdf_font}">•</font>'),
+                    paragraph_style,
+                )
+            )
     story.append(Spacer(1, 1))
     docx_path, pdf_path = output_dir / "document.docx", output_dir / "document.pdf"
     document.core_properties.author = ""
     document.core_properties.last_modified_by = ""
     document.save(docx_path)
-    pdf = SimpleDocTemplate(
+    pdf = BaseDocTemplate(
         str(pdf_path),
         pagesize=(geometry["page_width"], geometry["page_height"]),
         topMargin=geometry["margin_top"],
@@ -257,6 +316,17 @@ def render_documents(draft: dict, template: dict, output_dir: Path) -> list[dict
         title=draft["title"],
         author="",
     )
+    frame = Frame(
+        pdf.leftMargin,
+        pdf.bottomMargin,
+        pdf.width,
+        pdf.height,
+        leftPadding=0,
+        rightPadding=0,
+        topPadding=0,
+        bottomPadding=0,
+    )
+    pdf.addPageTemplates(PageTemplate(id="CV", frames=[frame]))
     pdf.build(story)
     expected = " ".join(canonical_text(draft).split())
     docx_text = " ".join("\n".join(p.text for p in Document(docx_path).paragraphs).split())

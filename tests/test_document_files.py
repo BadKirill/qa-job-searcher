@@ -1,3 +1,4 @@
+import base64
 import io
 import json
 import subprocess
@@ -9,6 +10,7 @@ import pytest
 from docx import Document
 from docx.shared import Pt
 from pypdf import PdfReader, PdfWriter
+from pypdf.generic import DictionaryObject, NameObject, NumberObject
 from reportlab.pdfgen import canvas
 
 from qa_job_bot import document_files as files
@@ -71,8 +73,85 @@ def test_docx_text_and_style(size):
 def test_pdf_text_and_process_isolation():
     result = files.parse_template(pdf_bytes(), "CV.pdf")
     assert result["extracted_text"] == "Alex tests APIs"
-    assert result["style"]["layout_fidelity"] == "text_only"
+    assert result["style"]["layout_fidelity"] == "visual_reference"
+    assert result["facts"][0]["source"] == "page:1:block:1"
+    assert result["facts"][0]["kind"] == "body"
+    assert result["reference"]["page_count"] == 1
+    assert base64.b64decode(result["reference"]["pages"][0]["image_base64"]).startswith(
+        b"\x89PNG\r\n\x1a\n"
+    )
     assert files.parse_template(docx_bytes(), "CV.docx")["facts"][0]["id"] == "fact-1"
+
+
+def test_isolated_pdf_parser_returns_complete_visual_payload():
+    output = io.BytesIO()
+    document = canvas.Canvas(output)
+    for page in range(2):
+        document.setFont("Helvetica", 9)
+        for line in range(35):
+            document.drawString(
+                50, 790 - line * 16, f"Page {page + 1}, example QA evidence paragraph {line + 1}."
+            )
+        document.showPage()
+    document.save()
+    parsed = files.parse_template(output.getvalue(), "example.pdf")
+    assert len(parsed["facts"]) == 70
+    assert len(json.dumps(parsed)) > 65_536
+    assert parsed["reference"]["page_count"] == 2
+    assert parsed["facts"][-1]["source"] == "page:2:block:35"
+    assert parsed["facts"][-1]["text"].endswith("paragraph 35.")
+
+
+def test_active_pdf_rejected_before_geometry_and_rendering(monkeypatch):
+    def unexpected(*args, **kwargs):
+        pytest.fail("Active PDF reached geometry/rendering")
+
+    monkeypatch.setattr(files, "extract_pdf_template", unexpected)
+    writer = PdfWriter(clone_from=PdfReader(io.BytesIO(pdf_bytes())))
+    writer.add_js("app.alert('unsafe')")
+    output = io.BytesIO()
+    writer.write(output)
+    with pytest.raises(files.DocumentFileError, match="Active PDF"):
+        files._parse_template(output.getvalue(), "CV.pdf")
+
+
+@pytest.mark.parametrize(
+    "dimensions,allowed",
+    [
+        ([(10, 10)], True),
+        ([(-1, 10)], False),
+        ([(10000, 10000)], False),
+        ([(5000, 4000), (5000, 4000)], False),
+    ],
+)
+def test_pdf_image_resource_limits_apply_before_native_decoder(monkeypatch, dimensions, allowed):
+    writer = PdfWriter(clone_from=PdfReader(io.BytesIO(pdf_bytes())))
+    resources = DictionaryObject()
+    for index, (width, height) in enumerate(dimensions):
+        resource = DictionaryObject(
+            {
+                NameObject("/Subtype"): NameObject("/Image"),
+                NameObject("/Width"): NumberObject(width),
+                NameObject("/Height"): NumberObject(height),
+            }
+        )
+        resources[NameObject(f"/Image{index}")] = writer._add_object(resource)
+    writer.pages[0][NameObject("/Resources")] = DictionaryObject(
+        {NameObject("/XObject"): resources}
+    )
+    output = io.BytesIO()
+    writer.write(output)
+    calls = []
+    monkeypatch.setattr(
+        files, "extract_pdf_template", lambda *args, **kwargs: calls.append(True) or {"safe": True}
+    )
+    if allowed:
+        assert files._pdf(output.getvalue()) == {"safe": True}
+        assert calls == [True]
+    else:
+        with pytest.raises(files.DocumentFileError, match="image"):
+            files._pdf(output.getvalue())
+        assert calls == []
 
 
 @pytest.mark.parametrize(

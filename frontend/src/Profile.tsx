@@ -2,6 +2,12 @@ import { useRef, useState } from "react";
 import { errorMessage, request, requestId } from "./api";
 import { Chat } from "./Chat";
 import { Icon, Notice } from "./components";
+import {
+  editedFactSource,
+  PdfFactSource,
+  PdfReference,
+  type PdfSelection,
+} from "./PdfReference";
 import type { Profile as ProfileData, Template } from "./types";
 
 export function Profile({
@@ -14,12 +20,16 @@ export function Profile({
   onChange: () => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
+  const sidePanel = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState<Template | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [expectedVersion, setExpectedVersion] = useState<string | null>(null);
+  const [selectedSource, setSelectedSource] = useState<PdfSelection | null>(
+    null,
+  );
 
   function openDraft(value: Template) {
     setDraft(structuredClone(value));
@@ -27,6 +37,7 @@ export function Profile({
     setConfirmed(false);
     setError("");
     setNotice("");
+    setSelectedSource(null);
   }
   async function upload(file?: File) {
     if (!file) return;
@@ -96,6 +107,27 @@ export function Profile({
       setBusy(false);
     }
   }
+  async function reparse(template: Template) {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const fresh = await request<Template>(
+        `/templates/${encodeURIComponent(template.id)}/reparse`,
+        { method: "POST", body: {} },
+      );
+      openDraft(fresh);
+      setNotice(
+        "PDF прочитан заново. Сверьте факты с оригиналом и подтвердите их повторно. Активный эталон не изменён.",
+      );
+      onChange();
+    } catch (failure) {
+      setError(errorMessage(failure));
+    } finally {
+      setBusy(false);
+    }
+  }
   function changeFact(index: number, text: string) {
     setDraft(
       (current) =>
@@ -103,12 +135,26 @@ export function Profile({
           ...current,
           facts: current.facts.map((fact, position) =>
             position === index
-              ? { ...fact, text, source: "user_confirmed" }
+              ? { ...fact, text, source: editedFactSource(fact.source) }
               : fact,
           ),
         },
     );
     setConfirmed(false);
+  }
+  function selectFactSource(page: number, block: number) {
+    setSelectedSource((current) => ({
+      page,
+      block,
+      sequence: (current?.sequence ?? 0) + 1,
+    }));
+    if (sidePanel.current) {
+      sidePanel.current.scrollTop = 0;
+      sidePanel.current.scrollIntoView?.({
+        block: "nearest",
+        behavior: "smooth",
+      });
+    }
   }
 
   return (
@@ -173,13 +219,23 @@ export function Profile({
         </button>
       </section>
       <p className="template-format-note muted small">
-        Из DOCX сохраняются базовый шрифт, поля и размер страницы. Колонки,
-        фотографии и таблицы не копируются. Из PDF извлекается только текст.
+        Поддерживаются базовые стили одноколоночного CV: шрифт, поля и размер
+        страницы. PDF сохраняется вместе с изображениями страниц для визуального
+        сравнения. Колонки, фотографии и сложные таблицы не воспроизводятся;
+        точное совпадение оформления не гарантируется.
       </p>
       <div className="language-note">
         <Icon name="check" size={16} />
         <span>CV всегда на английском. Cover letter — на языке вакансии.</span>
       </div>
+      {!draft && profile.active && /\.pdf$/i.test(profile.active.filename) && (
+        <PdfReference
+          key={profile.active.id}
+          template={profile.active}
+          busy={busy}
+          onReparse={() => void reparse(profile.active!)}
+        />
+      )}
       {!draft && profile.drafts.length > 0 && (
         <section className="draft-list">
           <h3>Незавершённые черновики</h3>
@@ -233,19 +289,25 @@ export function Profile({
                   <span className="fact-number">
                     {String(index + 1).padStart(2, "0")}
                   </span>
-                  <label className="fact-field">
-                    <span className="sr-only">Факт {index + 1}</span>
-                    <textarea
-                      aria-label={`Факт ${index + 1}`}
-                      rows={2}
-                      value={fact.text}
-                      onChange={(event) =>
-                        changeFact(index, event.target.value)
-                      }
-                      maxLength={3000}
+                  <div className="fact-field">
+                    <label>
+                      <span className="sr-only">Факт {index + 1}</span>
+                      <textarea
+                        aria-label={`Факт ${index + 1}`}
+                        rows={2}
+                        value={fact.text}
+                        onChange={(event) =>
+                          changeFact(index, event.target.value)
+                        }
+                        maxLength={3000}
+                      />
+                    </label>
+                    <PdfFactSource
+                      source={fact.source}
+                      pageCount={draft.reference?.page_count ?? 0}
+                      onSelect={selectFactSource}
                     />
-                    <small>Источник: {fact.source}</small>
-                  </label>
+                  </div>
                   <button
                     className="icon-button"
                     aria-label={`Удалить факт ${index + 1}`}
@@ -327,7 +389,19 @@ export function Profile({
               </p>
             )}
           </section>
-          <Chat templateId={draft.id} revision={revision} />
+          <div className="profile-side-panel" ref={sidePanel}>
+            {/\.pdf$/i.test(draft.filename) && (
+              <PdfReference
+                key={draft.id}
+                template={draft}
+                selected={selectedSource}
+                initiallyOpen
+                busy={busy}
+                onReparse={() => void reparse(draft)}
+              />
+            )}
+            <Chat templateId={draft.id} revision={revision} />
+          </div>
         </div>
       ) : (
         <section className="profile-help">

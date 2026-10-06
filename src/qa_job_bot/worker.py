@@ -11,12 +11,13 @@ from langdetect import DetectorFactory, LangDetectException, detect_langs
 
 from qa_job_bot.agent_gateway import AgentGateway, AgentUnavailable
 from qa_job_bot.config import Settings, load_boards, load_profile, load_telegram_channels
-from qa_job_bot.document_files import DocumentFileError, render_documents
+from qa_job_bot.document_files import DocumentFileError, parse_template, render_documents
 from qa_job_bot.document_policy import (
     PolicyViolation,
     content_hash,
     validate_draft,
     validate_review,
+    validate_visual_review,
 )
 from qa_job_bot.service import JobSearchService, build_sources
 from qa_job_bot.web_security import WebSettings
@@ -105,6 +106,9 @@ class Worker:
 
     async def document(self, task: dict) -> None:
         context = {**task["payload"]["context"], "task_id": task["id"], "kind": task["kind"]}
+        reference = context["template"].get("reference")
+        if context["template"].get("style", {}).get("source_format") == "pdf" and not reference:
+            raise PolicyViolation("Перечитайте PDF в профиле и подтвердите целые абзацы эталона.")
         context["language"] = "en" if task["kind"] == "cv" else vacancy_language(context["job"])
         for attempt in range(3):
             draft = validate_draft(await self.gateway.generate(context), context)
@@ -126,18 +130,43 @@ class Worker:
             return
         directory = self.settings.data_dir / "artifacts" / task["id"]
         files = await asyncio.to_thread(render_documents, draft, context["template"], directory)
-        artifact_ids = []
+        file_hashes = {}
         for file in files:
             path = Path(file["path"]).resolve()
             if not path.is_relative_to(directory.resolve()):
                 raise DocumentFileError("Недопустимый путь документа.")
+            file_hashes[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
+        visual_review = None
+        visual_reviewer_metadata = None
+        if reference:
+            pdf_path = next(Path(file["path"]) for file in files if file["format"] == "pdf")
+            pdf_content = pdf_path.read_bytes()
+            if hashlib.sha256(pdf_content).hexdigest() != file_hashes[str(pdf_path.resolve())]:
+                raise DocumentFileError("Документ изменился после рендеринга.")
+            rendered = await asyncio.to_thread(parse_template, pdf_content, "result.pdf")
+            visual_review = validate_visual_review(
+                await self.gateway.visual_review(context, draft, rendered["reference"]),
+                draft,
+                reference,
+                rendered["reference"],
+            )
+            visual_reviewer_metadata = dict(getattr(self.gateway, "last_run_metadata", {}))
+        if not self.transition(task, "rendering"):
+            return
+        artifact_ids = []
+        for file in files:
+            path = Path(file["path"]).resolve()
+            if hashlib.sha256(path.read_bytes()).hexdigest() != file_hashes[str(path)]:
+                raise DocumentFileError("Документ изменился после проверки.")
+        for file in files:
+            path = Path(file["path"]).resolve()
             artifact = self.store.add_artifact(
                 task["id"],
                 {
                     "filename": file["filename"],
                     "format": file["format"],
                     "path": str(path),
-                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    "sha256": file_hashes[str(path)],
                     "draft_hash": content_hash(draft),
                 },
             )
@@ -153,6 +182,8 @@ class Worker:
                 "template_version": context["template"]["version"],
                 "generator": generator_metadata,
                 "reviewer": reviewer_metadata,
+                "visual_review": visual_review,
+                "visual_reviewer": visual_reviewer_metadata,
             },
         )
 

@@ -1,12 +1,18 @@
+import base64
+import hashlib
+import io
 import json
 import sys
 import time
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from openai_codex import ApprovalMode, ExternalMessage, Sandbox
+from openai_codex._inputs import _to_wire_turn_input
 from openai_codex.generated.v2_all import TurnStatus
+from PIL import Image
 
 from qa_job_bot.agent_gateway import (
     DISABLED_FEATURES,
@@ -14,6 +20,7 @@ from qa_job_bot.agent_gateway import (
     AgentUnavailable,
     JsonResponse,
     _deny_request,
+    reference_images,
     safe_overrides,
     verify_config,
 )
@@ -50,6 +57,32 @@ def draft():
             {"heading": "Experience", "paragraphs": [{"text": "QA Engineer", "fact_ids": ["f1"]}]}
         ],
     }
+
+
+def visual_reference(size=(320, 400), color="white"):
+    image = Image.new("RGB", size, color)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    raw = buffer.getvalue()
+    return {
+        "sha256": "a" * 64,
+        "page_count": 1,
+        "pages": [
+            {
+                "page": 1,
+                "width": size[0],
+                "height": size[1],
+                "image_base64": base64.b64encode(raw).decode(),
+                "image_sha256": hashlib.sha256(raw).hexdigest(),
+            }
+        ],
+    }
+
+
+def visual_context():
+    data = context()
+    data["template"]["reference"] = visual_reference()
+    return data
 
 
 def test_effective_config_and_overrides():
@@ -245,3 +278,205 @@ async def test_real_mcp_prefetch_roundtrip(tmp_path):
     with pytest.raises(ExceptionGroup) as error:
         await AgentGateway()._mcp_snapshot(payload, ["run_shell"])
     assert "MCP tools" in repr(error.value)
+
+
+def test_visual_reference_png_validation_and_manifest():
+    reference = visual_reference()
+    manifest, images = reference_images(reference)
+    assert manifest["sha256"] == reference["sha256"]
+    assert "image_base64" not in manifest["pages"][0]
+    assert len(images) == 1
+    assert images[0]["type"] == "input_image"
+    assert images[0]["detail"] == "high"
+    assert (
+        images[0]["image_url"] == "data:image/png;base64," + reference["pages"][0]["image_base64"]
+    )
+    assert reference_images(None) == (None, [])
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"image_base64": None},
+        {"image_base64": "https://external.example/image.png"},
+        {"image_base64": "file:///private/cv.png"},
+        {"image_base64": "%%%"},
+        {"image_base64": base64.b64encode(b"not PNG").decode()},
+        {"image_sha256": "b" * 64},
+        {"width": 319},
+        {"height": 399},
+    ],
+)
+def test_visual_reference_rejects_unsafe_or_mismatched_png(change):
+    reference = visual_reference()
+    reference["pages"][0].update(change)
+    with pytest.raises(ValueError):
+        reference_images(reference)
+
+
+def test_visual_reference_encoded_and_total_bytes_limits(monkeypatch):
+    reference = visual_reference()
+    encoded = reference["pages"][0]["image_base64"]
+    raw_length = len(base64.b64decode(encoded))
+    monkeypatch.setattr("qa_job_bot.agent_gateway.MAX_REFERENCE_ENCODED", len(encoded))
+    monkeypatch.setattr("qa_job_bot.agent_gateway.MAX_REFERENCE_BYTES", raw_length)
+    assert len(reference_images(reference)[1]) == 1
+    two_pages = deepcopy(reference)
+    two_pages["page_count"] = 2
+    second = deepcopy(two_pages["pages"][0])
+    second["page"] = 2
+    two_pages["pages"].append(second)
+    with pytest.raises(ValueError, match="encoded size"):
+        reference_images(two_pages)
+    monkeypatch.setattr("qa_job_bot.agent_gateway.MAX_REFERENCE_ENCODED", len(encoded) * 2)
+    with pytest.raises(ValueError, match="PNG size"):
+        reference_images(two_pages)
+
+
+def test_visual_reference_rejects_corrupted_crc_and_animation():
+    reference = visual_reference()
+    corrupted = bytearray(base64.b64decode(reference["pages"][0]["image_base64"]))
+    corrupted[corrupted.index(b"IDAT") + 5] ^= 1
+    reference["pages"][0].update(
+        image_base64=base64.b64encode(corrupted).decode(),
+        image_sha256=hashlib.sha256(corrupted).hexdigest(),
+    )
+    with pytest.raises((SyntaxError, OSError)):
+        reference_images(reference)
+    output = io.BytesIO()
+    Image.new("RGB", (320, 400), "red").save(
+        output,
+        format="PNG",
+        save_all=True,
+        append_images=[Image.new("RGB", (320, 400), "blue")],
+        duration=100,
+        loop=0,
+    )
+    animated = output.getvalue()
+    reference["pages"][0].update(
+        image_base64=base64.b64encode(animated).decode(),
+        image_sha256=hashlib.sha256(animated).hexdigest(),
+    )
+    with pytest.raises(ValueError, match="Animated"):
+        reference_images(reference)
+
+
+async def test_multimodal_external_message_uses_sdk_wire_schema_and_no_image_tools(monkeypatch):
+    gateway, runner = setup_clients(monkeypatch)
+    await gateway.generate(visual_context())
+    message = runner.thread.run.call_args.args[0]
+    assert isinstance(message, ExternalMessage)
+    assert isinstance(message.content, list)
+    assert [item["type"] for item in message.content] == ["input_text", "input_text", "input_image"]
+    text = json.loads(message.content[0]["text"])
+    assert text["visual_references"]["original_template"]["page_count"] == 1
+    assert "image_base64" not in json.dumps(text)
+    inputs, tool_output = _to_wire_turn_input(message)
+    assert inputs == []
+    serialized = tool_output.model_dump(mode="json")
+    assert serialized["output"][2]["image_url"].startswith("data:image/png;base64,")
+    assert serialized["output"][2]["detail"] == "high"
+    options = runner.thread_start.call_args.kwargs
+    assert "company/date entries" in options["developer_instructions"]
+    assert "images show document appearance" in options["base_instructions"]
+    assert "view_image" in DISABLED_FEATURES
+    assert "image_base64" not in json.dumps(gateway.last_run_metadata)
+    paragraph = runner.thread.run.call_args.kwargs["output_schema"]["$defs"]["Paragraph"]
+    assert set(paragraph["required"]) == set(paragraph["properties"])
+    assert "default" not in paragraph["properties"]["kind"]
+    assert "do not reproduce CV sections" in options["developer_instructions"]
+
+
+async def test_reviewer_receives_same_original_images_in_separate_turn(monkeypatch):
+    gateway, runner = setup_clients(
+        monkeypatch,
+        tools=[{"name": "qa_task", "tools": dict.fromkeys([*TOOLS, "get_document_draft"], {})}],
+    )
+    await gateway.review(visual_context(), draft())
+    message = runner.thread.run.call_args.args[0]
+    assert (
+        message.content[-1]["image_url"]
+        == "data:image/png;base64,"
+        + (visual_context()["template"]["reference"]["pages"][0]["image_base64"])
+    )
+    assert (
+        "original template pages" in runner.thread_start.call_args.kwargs["developer_instructions"]
+    )
+    assert (
+        "never require CV sections"
+        in runner.thread_start.call_args.kwargs["developer_instructions"]
+    )
+
+
+async def test_visual_review_binds_both_references_and_draft_hash(monkeypatch):
+    gateway, runner = setup_clients(
+        monkeypatch,
+        tools=[{"name": "qa_task", "tools": dict.fromkeys([*TOOLS, "get_document_draft"], {})}],
+    )
+    rendered = visual_reference(color="blue")
+    rendered["sha256"] = "c" * 64
+    await gateway.visual_review(visual_context(), draft(), rendered)
+    message = runner.thread.run.call_args.args[0]
+    data = json.loads(message.content[0]["text"])
+    assert data["template_sha256"] == "a" * 64
+    assert data["rendered_sha256"] == "c" * 64
+    assert len(data["draft_hash"]) == 64
+    assert len([item for item in message.content if item["type"] == "input_image"]) == 2
+    assert "rendered_reference" not in data
+    assert "base64" not in json.dumps(data)
+    first = json.loads(message.content[1]["text"])["page_references"]
+    second = json.loads(message.content[3]["text"])["page_references"]
+    assert first[0]["reference"] == "original_template"
+    assert second[0]["reference"] == "rendered_document"
+    assert (
+        "independent visual document reviewer"
+        in runner.thread_start.call_args.kwargs["developer_instructions"]
+    )
+
+
+async def test_visual_review_requires_both_original_and_rendered_images():
+    gateway = AgentGateway()
+    with pytest.raises(ValueError, match="requires original"):
+        await gateway.visual_review(context(), draft(), visual_reference())
+    with pytest.raises(ValueError, match="requires original"):
+        await gateway.visual_review(visual_context(), draft(), None)
+
+
+async def test_visual_review_identical_pngs_keep_both_document_page_references(monkeypatch):
+    gateway, runner = setup_clients(
+        monkeypatch,
+        tools=[{"name": "qa_task", "tools": dict.fromkeys([*TOOLS, "get_document_draft"], {})}],
+    )
+    rendered = visual_reference()
+    rendered["sha256"] = "c" * 64
+    await gateway.visual_review(visual_context(), draft(), rendered)
+    message = runner.thread.run.call_args.args[0]
+    assert [item["type"] for item in message.content] == ["input_text", "input_text", "input_image"]
+    references = json.loads(message.content[1]["text"])["page_references"]
+    assert [item["reference"] for item in references] == ["original_template", "rendered_document"]
+    assert [item["source_sha256"] for item in references] == ["a" * 64, "c" * 64]
+    assert references[0]["image_sha256"] == references[1]["image_sha256"]
+    assert "byte-identical PNGs" in runner.thread_start.call_args.kwargs["base_instructions"]
+
+
+async def test_invalid_image_blocks_provider_start_and_is_not_logged(monkeypatch):
+    gateway = AgentGateway(codex_bin=sys.executable)
+    start = AsyncMock()
+    monkeypatch.setattr(gateway, "_client", start)
+    data = visual_context()
+    data["template"]["reference"]["pages"][0]["image_base64"] = "private-content-invalid"
+    with pytest.raises(AgentUnavailable):
+        await gateway.generate(data)
+    start.assert_not_called()
+    assert "private" not in gateway.last_diagnostic
+
+
+async def test_invalid_rendered_image_blocks_visual_reviewer_before_provider_start(monkeypatch):
+    gateway = AgentGateway(codex_bin=sys.executable)
+    start = AsyncMock()
+    monkeypatch.setattr(gateway, "_client", start)
+    rendered = visual_reference()
+    rendered["pages"][0]["image_sha256"] = "f" * 64
+    with pytest.raises(AgentUnavailable):
+        await gateway.visual_review(visual_context(), draft(), rendered)
+    start.assert_not_called()

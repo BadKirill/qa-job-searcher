@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import hashlib
 import hmac
 import os
@@ -9,7 +10,7 @@ from uuid import uuid4
 
 import uvicorn
 from fastapi import FastAPI, Query, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from qa_job_bot.document_files import DocumentFileError, parse_template
@@ -43,6 +44,7 @@ class Fact(Input):
     id: Text
     text: Annotated[str, Field(min_length=1, max_length=6000)]
     source: Annotated[str, Field(min_length=1, max_length=400)]
+    kind: Literal["body", "bullet", "entry", "role", "contact", "heading", "title"] = "body"
 
 
 class TemplateChange(Input):
@@ -82,7 +84,12 @@ class Generation(Input):
 def public_template(template: dict | None) -> dict | None:
     if template is None:
         return None
-    return {key: value for key, value in template.items() if key not in {"path", "style"}}
+    result = {
+        key: value for key, value in template.items() if key not in {"path", "style", "reference"}
+    }
+    if reference := template.get("reference"):
+        result["reference"] = {key: reference[key] for key in ("sha256", "page_count")}
+    return result
 
 
 def job_context(job: dict) -> dict:
@@ -271,12 +278,71 @@ def create_app(settings: WebSettings | None = None, store: WebStore | None = Non
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(content)
         return public_template(
-            store.add_template({**parsed, "filename": filename, "path": str(path.resolve())})
+            store.add_template(
+                {
+                    **parsed,
+                    "filename": filename,
+                    "path": str(path.resolve()),
+                    "source_sha256": hashlib.sha256(content).hexdigest(),
+                }
+            )
+        )
+
+    def template_source(template: dict) -> Path:
+        path = Path(template.get("path", ""))
+        allowed = (settings.data_dir / "templates").resolve()
+        if path.is_symlink() or not path.resolve().is_relative_to(allowed) or not path.is_file():
+            raise StoreError("Исходный файл шаблона недоступен.", 404)
+        if path.stat().st_size > 10 * 1024 * 1024:
+            raise StoreError("Недопустимый размер исходного файла.", 422)
+        expected = template.get("source_sha256") or (template.get("reference") or {}).get("sha256")
+        if expected and not hmac.compare_digest(
+            hashlib.sha256(path.read_bytes()).hexdigest(), expected
+        ):
+            raise StoreError("Исходный файл шаблона изменён. Загрузите его заново.", 409)
+        return path
+
+    @app.get("/api/templates/{template_id}/source")
+    def source(template_id: str):
+        template = store.template(template_id)
+        return FileResponse(template_source(template), filename=template["filename"])
+
+    @app.get("/api/templates/{template_id}/pages/{page}")
+    def template_page(template_id: str, page: int):
+        template = store.template(template_id)
+        pages = (template.get("reference") or {}).get("pages", [])
+        if page < 1 or page > len(pages):
+            raise StoreError("Страница эталона не найдена.", 404)
+        return Response(
+            base64.b64decode(pages[page - 1]["image_base64"], validate=True),
+            media_type="image/png",
+        )
+
+    @app.post("/api/templates/{template_id}/reparse", status_code=201)
+    async def reparse(template_id: str):
+        template = store.template(template_id)
+        path = template_source(template)
+        if path.suffix.lower() != ".pdf":
+            raise StoreError("Повторное чтение доступно для PDF.", 422)
+        content = path.read_bytes()
+        parsed = await asyncio.to_thread(parse_template, content, template["filename"])
+        return public_template(
+            store.add_template(
+                {
+                    **parsed,
+                    "filename": template["filename"],
+                    "path": str(path.resolve()),
+                    "source_sha256": hashlib.sha256(content).hexdigest(),
+                    "instructions": template.get("instructions", ""),
+                }
+            )
         )
 
     @app.patch("/api/template-drafts/{template_id}")
     def update(template_id: str, data: TemplateChange):
-        return public_template(store.update_template(template_id, data.model_dump()))
+        return public_template(
+            store.update_template(template_id, data.model_dump(exclude_unset=True))
+        )
 
     @app.post("/api/template-drafts/{template_id}/activate")
     def activate(template_id: str, data: Activation):

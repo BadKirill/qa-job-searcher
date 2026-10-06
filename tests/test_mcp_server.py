@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import time
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ from qa_job_bot.mcp_server import (
     create_server,
     load_payload,
     main,
+    reference_manifest,
     scope_context,
 )
 
@@ -36,6 +38,22 @@ def context():
 
 def scope(role="generator", expires=None):
     return TaskScope("owner", "job-1", "v1", expires or time.time() + 60, role)
+
+
+def visual_reference():
+    return {
+        "sha256": "a" * 64,
+        "page_count": 1,
+        "pages": [
+            {
+                "page": 1,
+                "width": 100,
+                "height": 200,
+                "image_sha256": "b" * 64,
+                "image_base64": "image-data-never-in-MCP",
+            }
+        ],
+    }
 
 
 @pytest.mark.parametrize("role", ["generator", "reviewer", "chat"])
@@ -147,3 +165,97 @@ async def test_actual_stdio_transport_rejects_cross_task_access(tmp_path):
         assert (await client.call_tool("get_job_context", {"task_id": "other"})).isError
         assert (await client.call_tool("get_document_draft", {})).isError
         assert (await client.call_tool("run_shell", {"command": "id"})).isError
+
+
+async def test_mcp_template_manifest_omits_image_and_raw_text_payload():
+    source = context()
+    source["template"].update(reference=visual_reference(), raw_blocks=[{"text": "unconfirmed"}])
+    scoped = scope_context(source)
+    assert "image_base64" not in json.dumps(scoped)
+    assert "raw_blocks" not in scoped["template"]
+    server = create_server(source, scope())
+    result = str(await server.call_tool("get_template_metadata", {}))
+    assert "page_count" in result
+    assert "image-data" not in result
+    assert "unconfirmed" not in result
+    assert scoped["template"]["facts"] == source["template"]["facts"]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"sha256": "invalid"},
+        {"sha256": 123},
+        {"page_count": 0},
+        {"page_count": 21},
+        {"page_count": True},
+        {"pages": []},
+        {"pages": "bad"},
+        {"path": "/private/template.pdf"},
+    ],
+)
+def test_visual_manifest_rejects_invalid_reference(change):
+    with pytest.raises(ValueError):
+        reference_manifest(visual_reference() | change)
+    assert reference_manifest(None) is None
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"page": 2},
+        {"page": True},
+        {"width": 0},
+        {"width": 1401},
+        {"height": True},
+        {"image_sha256": "invalid"},
+        {"image_sha256": None},
+        {"url": "https://external.example"},
+    ],
+)
+def test_visual_manifest_rejects_invalid_page_metadata(change):
+    reference = visual_reference()
+    reference["pages"][0].update(change)
+    with pytest.raises(ValueError):
+        reference_manifest(reference)
+
+
+def test_visual_manifest_page_structure_pixel_limit_and_deep_copy():
+    reference = visual_reference()
+    for bad in (None, "image", {"page": 1}):
+        reference["pages"] = [bad]
+        with pytest.raises(ValueError):
+            reference_manifest(reference)
+    with pytest.raises(ValueError):
+        reference_manifest("reference")
+    reference = visual_reference()
+    reference["pages"][0].update(width=1400, height=1400)
+    reference["pages"] = [
+        deepcopy(reference["pages"][0]) | {"page": index} for index in range(1, 16)
+    ]
+    reference["page_count"] = 15
+    manifest = reference_manifest(reference)
+    assert manifest["page_count"] == 15
+    reference["pages"][0]["width"] = 100
+    assert manifest["pages"][0]["width"] == 1400
+    reference["pages"][0]["width"] = 1400
+    reference["page_count"] = 16
+    reference["pages"].append(deepcopy(reference["pages"][0]) | {"page": 16})
+    with pytest.raises(ValueError, match="pixel limit"):
+        reference_manifest(reference)
+
+
+def test_visual_manifest_accepts_page_count_and_pixel_boundaries():
+    reference = visual_reference()
+    reference["pages"] = [deepcopy(reference["pages"][0]) | {"page": i} for i in range(1, 21)]
+    reference["page_count"] = 20
+    assert reference_manifest(reference)["page_count"] == 20
+    reference["pages"] = [
+        {"page": i, "width": 1400, "height": 1400, "image_sha256": "b" * 64} for i in range(1, 16)
+    ]
+    reference["pages"].append({"page": 16, "width": 1000, "height": 600, "image_sha256": "b" * 64})
+    reference["page_count"] = 16
+    assert reference_manifest(reference)["page_count"] == 16
+    reference["pages"][-1]["height"] += 1
+    with pytest.raises(ValueError, match="pixel limit"):
+        reference_manifest(reference)

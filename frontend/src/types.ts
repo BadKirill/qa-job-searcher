@@ -3,7 +3,12 @@ export type Session = {
   setup_required: boolean;
   csrf_token?: string;
 };
-export type Fact = { id: string; text: string; source: string };
+export type Fact = {
+  id: string;
+  text: string;
+  source: string;
+  kind?: "body" | "bullet" | "entry" | "role" | "contact" | "heading" | "title";
+};
 export type Template = {
   id: string;
   filename: string;
@@ -14,6 +19,7 @@ export type Template = {
   created_at: string;
   extracted_text: string;
   conversation_id?: string;
+  reference?: { sha256: string; page_count: number } | null;
 };
 export type Profile = { active: Template | null; drafts: Template[] };
 export type Artifact = { id: string; format: string; filename: string };

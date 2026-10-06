@@ -205,7 +205,7 @@ class WebStore(JobRepository):
             "id": str(uuid4()),
             "status": "draft",
             "created_at": utcnow().isoformat(),
-            "instructions": "",
+            "instructions": data.get("instructions", ""),
         }
         template["version"] = template["id"]
         with self._connect() as db:

@@ -8,7 +8,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { App } from "../src/App";
 import { Profile } from "../src/Profile";
-import { server, template } from "./fixtures";
+import { pdfTemplate, server, template } from "./fixtures";
 
 it("uploads a template, reviews facts, saves the draft and confirms an active version", async () => {
   const backend = server();
@@ -227,4 +227,124 @@ it("keeps unsaved edits after a server error", async () => {
       screen.queryByText("Не удалось записать черновик"),
     ).not.toBeInTheDocument(),
   );
+});
+
+it("shows uploaded PDF pages and keeps the source and paragraph kind after correcting a fact", async () => {
+  const backend = server();
+  render(
+    <Profile profile={backend.state.profile} revision={0} onChange={vi.fn()} />,
+  );
+  await userEvent.upload(
+    screen.getByLabelText("Файл эталонного CV"),
+    new File(["pdf"], "Reference.pdf"),
+  );
+  await screen.findByRole("heading", { name: "Факты из вашего CV" });
+  expect(
+    screen.getByRole("img", { name: "Исходный PDF, страница 1" }),
+  ).toBeInTheDocument();
+  await userEvent.click(
+    screen.getByRole("button", {
+      name: "Показать источник: страница 2, блок 1",
+    }),
+  );
+  expect(
+    screen.getByRole("img", { name: "Исходный PDF, страница 2" }),
+  ).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("checkbox"));
+  await userEvent.clear(screen.getByRole("textbox", { name: "Факт 2" }));
+  await userEvent.type(
+    screen.getByRole("textbox", { name: "Факт 2" }),
+    "Four years of API testing.",
+  );
+  expect(screen.getByRole("checkbox")).not.toBeChecked();
+  expect(
+    screen.getByRole("button", { name: "Сохранить эталон" }),
+  ).toBeDisabled();
+  expect(screen.getByText(/Уточнено вами/)).toBeInTheDocument();
+  await userEvent.click(
+    screen.getByRole("button", { name: "Сохранить черновик" }),
+  );
+  await screen.findByText(/Черновик сохранён/);
+  expect(backend.state.profile.drafts[0].facts[1]).toEqual({
+    id: "pdf-fact-2",
+    text: "Four years of API testing.",
+    source: "user_confirmed; original:page:2:block:1",
+    kind: "body",
+  });
+  await userEvent.click(
+    screen.getByRole("button", { name: "Закрыть черновик" }),
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: /Reference.pdf.*Продолжить/ }),
+  );
+  expect(
+    screen.getByRole("button", {
+      name: "Показать источник: страница 2, блок 1",
+    }),
+  ).toBeInTheDocument();
+});
+
+it("reparses a legacy PDF into an unconfirmed draft without modifying the active profile", async () => {
+  const backend = server();
+  const active = pdfTemplate({
+    status: "active",
+    version: "old-version",
+    reference: undefined,
+  });
+  backend.state.profile.active = active;
+  render(
+    <Profile profile={backend.state.profile} revision={0} onChange={vi.fn()} />,
+  );
+  expect(screen.getByText(/ещё нет изображений страниц/)).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Перечитать PDF" }));
+  await screen.findByRole("heading", { name: "Факты из вашего CV" });
+  expect(screen.getByText(/PDF прочитан заново/)).toBeInTheDocument();
+  expect(screen.getByRole("checkbox")).not.toBeChecked();
+  expect(
+    screen.getByRole("button", { name: "Сохранить эталон" }),
+  ).toBeDisabled();
+  expect(backend.state.profile.active).toEqual(active);
+  expect(
+    backend.calls.find((call) => call.path.endsWith("/reparse")),
+  ).toMatchObject({
+    path: "/templates/pdf-template/reparse",
+    method: "POST",
+    body: {},
+  });
+  expect(
+    screen.getByRole("link", { name: /Скачать исходный PDF/ }),
+  ).toHaveAttribute("href", "/api/templates/pdf-template-reparsed/source");
+  await userEvent.click(screen.getByRole("button", { name: "Перечитать PDF" }));
+  await waitFor(() =>
+    expect(
+      screen.getByRole("link", { name: /Скачать исходный PDF/ }),
+    ).toHaveAttribute(
+      "href",
+      "/api/templates/pdf-template-reparsed-reparsed/source",
+    ),
+  );
+  expect(backend.state.profile.active).toEqual(active);
+});
+
+it("keeps the existing PDF profile when rereading is denied", async () => {
+  const backend = server();
+  const active = pdfTemplate({ status: "active", version: "active-version" });
+  backend.state.profile.active = active;
+  backend.failures.push({
+    path: "/templates/pdf-template/reparse",
+    status: 422,
+    detail: "Исходный PDF повреждён",
+  });
+  render(
+    <Profile profile={backend.state.profile} revision={0} onChange={vi.fn()} />,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Перечитать PDF" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Исходный PDF повреждён",
+  );
+  expect(
+    screen.queryByRole("heading", { name: "Факты из вашего CV" }),
+  ).not.toBeInTheDocument();
+  expect(backend.state.profile.active).toEqual(active);
+  expect(backend.state.profile.drafts).toHaveLength(0);
 });

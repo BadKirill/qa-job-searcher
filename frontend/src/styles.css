@@ -1683,6 +1683,152 @@ small {
   max-width: 660px;
 }
 
+.profile-side-panel {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+@media (min-width: 1151px) {
+  .profile-side-panel {
+    position: sticky;
+    top: 20px;
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+  }
+}
+.pdf-reference {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px;
+  min-width: 0;
+  margin-bottom: 24px;
+}
+.profile-side-panel .pdf-reference {
+  margin-bottom: 0;
+}
+.pdf-reference-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  color: #728268;
+}
+.pdf-reference-heading h3 {
+  font-size: 18px;
+  color: #252a29;
+  font-weight: 550;
+  margin-top: 7px;
+}
+.pdf-reference-heading .eyebrow {
+  font-size: 8px;
+}
+.pdf-reference-heading p {
+  font-size: 11px;
+  margin-top: 9px;
+  overflow-wrap: anywhere;
+}
+.pdf-reference-explanation {
+  font-size: 11px;
+  margin: 14px 0;
+}
+.pdf-reference-actions,
+.pdf-page-actions,
+.pdf-page-actions > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.pdf-reference-actions .text-button {
+  font-size: 10px;
+}
+.pdf-pages {
+  border-top: 1px solid var(--border);
+  margin-top: 17px;
+  padding-top: 15px;
+}
+.pdf-pages > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #55704c;
+}
+.pdf-pages > summary > span {
+  background: #edf2e7;
+  border-radius: 4px;
+  padding: 3px 7px;
+  font-size: 10px;
+  margin-left: 7px;
+}
+.pdf-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 20px 0 12px;
+  font-size: 11px;
+  color: #728367;
+}
+.pdf-selected-source {
+  font-size: 10px;
+  color: #547848;
+  background: #f0f4eb;
+  padding: 10px;
+  margin-bottom: 12px;
+  border-radius: 6px;
+  line-height: 1.7;
+}
+.pdf-page-actions {
+  font-size: 9px;
+  color: #89967b;
+  margin-bottom: 12px;
+}
+.pdf-page-actions .text-button {
+  font-size: 9px;
+}
+.pdf-page-image {
+  overflow: auto;
+  max-height: 720px;
+  background: #f3f3ee;
+  border: 1px solid #e1e4d9;
+  border-radius: 5px;
+}
+.pdf-page-image img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.pdf-page-zoomed img {
+  width: 180%;
+  max-width: none;
+}
+.pdf-legacy-note {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.8;
+  background: #f5f7f1;
+  padding: 13px;
+  border-radius: 7px;
+  margin-top: 15px;
+}
+.fact-field {
+  display: flex;
+  flex-direction: column;
+}
+.fact-source-link {
+  font-size: inherit;
+  padding: 0;
+}
+@media (max-width: 620px) {
+  .pdf-reference {
+    padding: 21px 17px;
+  }
+  .pdf-page-image {
+    max-height: 520px;
+  }
+}
+
 @media (min-width: 801px) {
   .company-line {
     font-size: 12px;

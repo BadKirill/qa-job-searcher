@@ -8,6 +8,7 @@ from qa_job_bot.document_policy import (
     content_hash,
     validate_draft,
     validate_review,
+    validate_visual_review,
 )
 
 
@@ -156,3 +157,66 @@ def test_reviewer_explains_required_input(verdict):
     document = draft()
     response = review(document) | {"verdict": verdict, "issues": ["Confirm candidate role"]}
     assert validate_review(response, document, context())["verdict"] == verdict
+
+
+def visual_review(document):
+    return {
+        "verdict": "pass",
+        "issues": [],
+        "template_sha256": "a" * 64,
+        "rendered_sha256": "b" * 64,
+        "draft_hash": content_hash(document),
+    }
+
+
+def test_visual_review_binds_both_files_and_document():
+    document = draft()
+    result = visual_review(document)
+    assert (
+        validate_visual_review(result, document, {"sha256": "a" * 64}, {"sha256": "b" * 64})
+        == result
+    )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"approved": True},
+        {"verdict": "needs_input"},
+        {"template_sha256": "bad"},
+        {"template_sha256": "0" * 64},
+        {"rendered_sha256": "0" * 64},
+        {"draft_hash": "0" * 64},
+        {"verdict": "revise", "issues": ["Clipped content"]},
+        {"verdict": "pass", "issues": ["Missing section"]},
+        {"verdict": "revise", "issues": []},
+    ],
+)
+def test_visual_review_fails_closed(change):
+    document = draft()
+    with pytest.raises(PolicyViolation):
+        validate_visual_review(
+            visual_review(document) | change, document, {"sha256": "a" * 64}, {"sha256": "b" * 64}
+        )
+
+
+def test_paragraph_roles_are_validated_and_legacy_hashes_preserved():
+    document = draft()
+    paragraph = document["sections"][0]["paragraphs"][0]
+    paragraph["kind"] = "body"
+    assert content_hash(validate_draft(document, context())) == content_hash(draft())
+    paragraph["kind"] = "entry"
+    assert validate_draft(document, context())["sections"][0]["paragraphs"][0]["kind"] == "entry"
+    paragraph["kind"] = "script"
+    with pytest.raises(PolicyViolation):
+        validate_draft(document, context())
+
+
+def test_long_experience_section_keeps_all_entries_with_bounded_size():
+    document = draft()
+    paragraph = document["sections"][0]["paragraphs"][0]
+    document["sections"][0]["paragraphs"] = [copy.deepcopy(paragraph) for _ in range(200)]
+    assert len(validate_draft(document, context())["sections"][0]["paragraphs"]) == 200
+    document["sections"][0]["paragraphs"].append(copy.deepcopy(paragraph))
+    with pytest.raises(PolicyViolation, match="structure"):
+        validate_draft(document, context())
