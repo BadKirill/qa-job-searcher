@@ -522,7 +522,7 @@ async def test_idle_scheduler_recovers_wait_timeout(worker: Worker, monkeypatch)
 
 def test_default_gateway_is_constructed(worker: Worker, monkeypatch) -> None:
     sentinel = object()
-    monkeypatch.setattr(worker_module, "AgentGateway", lambda: sentinel)
+    monkeypatch.setattr(worker_module, "AgentGateway", lambda data_dir: sentinel)
     assert Worker(worker.store, worker.settings).gateway is sentinel
 
 

@@ -58,7 +58,7 @@ class Worker:
     def __init__(self, store: WebStore, settings: WebSettings, gateway=None, search=None):
         self.store = store
         self.settings = settings
-        self.gateway = gateway or AgentGateway()
+        self.gateway = gateway or AgentGateway(data_dir=settings.data_dir)
         self.search = search
         self.id = str(uuid4())
 
@@ -85,7 +85,8 @@ class Worker:
                     await self.document(task)
         except AgentUnavailable:
             self.transition(
-                task, "failed", error="Агент недоступен. Проверьте вход в Codex и лимит аккаунта."
+                task, "failed",
+                error="OpenAI API недоступен. Проверьте API-ключ, баланс и лимит проекта.",
             )
         except (PolicyViolation, DocumentFileError) as error:
             self.transition(task, "blocked", error=str(error))
