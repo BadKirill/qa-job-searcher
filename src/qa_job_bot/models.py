@@ -32,9 +32,14 @@ class Job:
     score: int = 0
     match_reasons: list[str] = field(default_factory=list)
     location_status: str = "unknown"
+    resolved_fingerprint: str | None = field(default=None, repr=False)
 
     @property
     def fingerprint(self) -> str:
+        return self.resolved_fingerprint or self.legacy_fingerprint
+
+    @property
+    def legacy_fingerprint(self) -> str:
         identity = "|".join(
             (
                 canonical_text(self.company),

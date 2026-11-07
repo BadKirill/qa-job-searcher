@@ -6,12 +6,16 @@ import type { Message } from "./types";
 export function Chat({
   templateId,
   jobId,
+  documentKind,
   revision,
+  onGenerated,
   onClose,
 }: {
   templateId?: string;
   jobId?: string;
+  documentKind?: "cv" | "cover_letter";
   revision: number;
+  onGenerated?: () => void;
   onClose?: () => void;
 }) {
   const messageInputId = useId();
@@ -20,6 +24,8 @@ export function Chat({
   const [text, setText] = useState("");
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [generationQueued, setGenerationQueued] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refresh, setRefresh] = useState(0);
   useEffect(() => {
@@ -84,6 +90,28 @@ export function Chat({
       setError(errorMessage(failure));
     } finally {
       setSending(false);
+    }
+  }
+  async function regenerate() {
+    if (!jobId || !documentKind || regenerating) return;
+    setRegenerating(true);
+    setGenerationQueued(false);
+    setError("");
+    try {
+      await request(`/jobs/${encodeURIComponent(jobId)}/documents`, {
+        method: "POST",
+        body: {
+          kind: documentKind,
+          language: documentKind === "cv" ? "en" : "auto",
+          request_id: requestId(),
+        },
+      });
+      setGenerationQueued(true);
+      onGenerated?.();
+    } catch (failure) {
+      setError(errorMessage(failure));
+    } finally {
+      setRegenerating(false);
     }
   }
   return (
@@ -162,6 +190,22 @@ export function Chat({
           </button>
         </div>
       </form>
+      {jobId && documentKind && (
+        <div className="chat-regenerate">
+          {generationQueued && (
+            <span role="status">Повторная генерация запущена.</span>
+          )}
+          <button
+            type="button"
+            className="button secondary"
+            disabled={!conversationId || regenerating}
+            onClick={() => void regenerate()}
+          >
+            <Icon name="refresh" size={16} />
+            {regenerating ? "Создаём заново…" : "Сгенерировать заново"}
+          </button>
+        </div>
+      )}
     </section>
   );
 }

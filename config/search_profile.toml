@@ -38,12 +38,19 @@ preferred_seniority = [
   "mid level",
   "medior",
   "senior",
-  "lead",
-  "head",
-  "manager",
-  "principal",
-  "staff",
-  "architect",
+]
+focus_qa_keywords = [
+  "manual qa",
+  "manual quality assurance",
+  "manual tester",
+  "manual testing",
+  "ручное тестирование",
+  "fullstack qa",
+  "full-stack qa",
+  "full stack qa",
+  "fullstack quality assurance",
+  "full-stack quality assurance",
+  "full stack quality assurance",
 ]
 domain_keywords = [
   "fintech",
@@ -58,14 +65,15 @@ domain_keywords = [
   "saas",
 ]
 skill_keywords = [
-  "playwright",
-  "selenium",
-  "cypress",
-  "python",
-  "typescript",
+  "manual testing",
+  "functional testing",
+  "regression testing",
+  "exploratory testing",
   "api testing",
-  "test automation",
-  "ci/cd",
+  "web testing",
+  "mobile testing",
+  "database testing",
+  "sql",
 ]
 allowed_locations = [
   "worldwide",

@@ -154,9 +154,14 @@ def test_generation_uses_user_preferences_without_promoting_them_to_facts(client
     updated = client.post(route, json={**original_request, "request_id": "updated"}).json()
     current_context = store.task(updated["id"], internal=True)["payload"]["context"]
     assert current_context["owner_messages"] == ["Focus on API testing and keep it concise"]
+    assert current_context["conversation_messages"] == [
+        {"role": "user", "text": "Focus on API testing and keep it concise"},
+        {"role": "assistant", "text": "I will use that preference"},
+    ]
     assert current_context["template"]["facts"] == profile["facts"]
     old_context = store.task(original["id"], internal=True)["payload"]["context"]
     assert old_context["owner_messages"] == []
+    assert old_context["conversation_messages"] == []
     replay = client.post(route, json=original_request)
     assert replay.status_code == 202
     assert replay.json()["id"] == original["id"]
@@ -172,9 +177,11 @@ def test_restore_keeps_job_visible_after_search_no_longer_returns_it(client):
     assert client.patch(state_route, json={"archived": False}).status_code == 200
     store.publish_search([], [])
     active = client.get("/api/jobs").json()
-    assert active["total"] == 1
-    assert active["items"][0]["id"] == job.fingerprint
-    assert active["items"][0]["applied_at"]
+    assert active["total"] == 0
+    applied = client.get("/api/jobs?tab=applied").json()
+    assert applied["total"] == 1
+    assert applied["items"][0]["id"] == job.fingerprint
+    assert applied["items"][0]["applied_at"]
 
 
 def test_unicode_setup_token_and_oversized_numeric_length_fail_without_server_error(tmp_path):

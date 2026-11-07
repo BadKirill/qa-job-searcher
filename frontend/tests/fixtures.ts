@@ -50,6 +50,7 @@ export function makeJob(id = "job-1", overrides: Partial<Job> = {}): Job {
     description: "Build reliable products.",
     salary: "€ 4,000 – 5,000 / month",
     score: 12,
+    match_reasons: ["роль: qa engineer", "подходит по географии"],
     published_at: "2026-10-02",
     applied_at: null,
     archived_at: null,
@@ -98,6 +99,8 @@ export function server() {
     profile: Profile;
     jobs: Job[];
     tasks: Task[];
+    snapshotAt: string | null;
+    lastSearchAt: string | null;
     messages: {
       id: string;
       role: string;
@@ -117,6 +120,8 @@ export function server() {
     },
     jobs: Array.from({ length: 11 }, (_, index) => makeJob(`job-${index + 1}`)),
     tasks: [],
+    snapshotAt: "2026-10-03T10:00:00Z",
+    lastSearchAt: "2026-10-03T09:59:00Z",
     messages: [],
   };
   const failures: { path: string; status: number; detail: string }[] = [];
@@ -152,16 +157,48 @@ export function server() {
     } else if (path === "/logout") return new Response(null, { status: 204 });
     else if (path === "/profile") data = state.profile;
     else if (path === "/tasks") data = { items: state.tasks };
+    else if (path.endsWith("/document-preview"))
+      data = {
+        draft: {
+          title: "Alex Example",
+          language: "en",
+          sections: [
+            {
+              heading: "Experience",
+              paragraphs: [
+                {
+                  text: "Tested APIs at Acme.",
+                  fact_ids: ["fact-1"],
+                  kind: "body",
+                },
+              ],
+            },
+          ],
+        },
+        facts: [
+          {
+            id: "fact-1",
+            text: "API testing at Acme",
+            source: "paragraph 1",
+          },
+        ],
+      };
     else if (path === "/jobs") {
       const page = Number(parsed.searchParams.get("page"));
-      const archived = parsed.searchParams.get("tab") === "archive";
-      const jobs = state.jobs.filter((job) => !!job.archived_at === archived);
+      const tab = parsed.searchParams.get("tab");
+      const jobs = state.jobs.filter((job) => {
+        if (tab === "archive") return !!job.archived_at;
+        if (tab === "applied") return !!job.applied_at && !job.archived_at;
+        return !job.applied_at && !job.archived_at;
+      });
       data = {
         items: jobs.slice((page - 1) * 10, page * 10),
         total: jobs.length,
         page,
         pages: Math.ceil(jobs.length / 10),
         snapshot_id: "snapshot-1",
+        snapshot_at: state.snapshotAt,
+        last_search_at: state.lastSearchAt,
       };
     } else if (path.endsWith("/state")) {
       const job = state.jobs.find((item) => item.id === path.split("/")[2])!;
@@ -177,6 +214,12 @@ export function server() {
       });
       state.tasks.push(task);
       data = task;
+    } else if (/^\/tasks\/[^/]+$/.test(path) && method === "DELETE") {
+      const taskId = path.split("/")[2];
+      state.tasks = state.tasks.filter((task) => task.id !== taskId);
+      for (const job of state.jobs)
+        job.documents = job.documents.filter((task) => task.id !== taskId);
+      return new Response(null, { status: 204 });
     } else if (path === "/search-runs") {
       const task = makeTask({ kind: "search" });
       state.tasks.push(task);

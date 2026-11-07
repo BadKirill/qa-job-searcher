@@ -6,9 +6,10 @@ from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from dataclasses import asdict
 from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
 
-from qa_job_bot.models import Job, utcnow
+from qa_job_bot.models import Job, canonical_text, utcnow
 
 
 class JobRepository:
@@ -65,18 +66,91 @@ class JobRepository:
                     PRIMARY KEY (chat_id, fingerprint),
                     FOREIGN KEY (fingerprint) REFERENCES jobs(fingerprint)
                 );
+                CREATE TABLE IF NOT EXISTS job_identities (
+                    source_key TEXT PRIMARY KEY, fingerprint TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS job_identities_fingerprint
+                    ON job_identities(fingerprint);
                 """
             )
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(jobs)")}
             if "payload" not in columns:
                 connection.execute("ALTER TABLE jobs ADD COLUMN payload TEXT")
+            for row in connection.execute(
+                "SELECT source,source_id,url,fingerprint FROM jobs ORDER BY last_seen_at DESC"
+            ):
+                connection.execute(
+                    "INSERT OR IGNORE INTO job_identities VALUES (?,?)",
+                    (
+                        self._source_key(row["source"], row["source_id"], row["url"]),
+                        row["fingerprint"],
+                    ),
+                )
+
+    @staticmethod
+    def _source_key(source: str, source_id: str, url: str) -> str:
+        return f"{source.casefold()}\x1f{source_id or url}"
+
+    def resolve_identities(self, jobs: list[Job]) -> None:
+        if not jobs:
+            return
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            mapped = {
+                row["source_key"]: row["fingerprint"]
+                for row in connection.execute("SELECT source_key,fingerprint FROM job_identities")
+            }
+            existing = {
+                row["fingerprint"]: row
+                for row in connection.execute(
+                    "SELECT fingerprint,source,source_id,title,company,location,url FROM jobs"
+                )
+            }
+            by_url = {
+                (
+                    row["url"],
+                    sha256(
+                        "|".join(
+                            canonical_text(row[name]) for name in ("company", "title", "location")
+                        ).encode()
+                    ).hexdigest(),
+                ): row["fingerprint"]
+                for row in existing.values()
+                if row["url"]
+            }
+            occupied = set(existing) | set(mapped.values())
+            for job in jobs:
+                source_key = self._source_key(job.source, job.source_id, job.url)
+                fingerprint = mapped.get(source_key)
+                if fingerprint is None:
+                    fingerprint = by_url.get((job.url, job.legacy_fingerprint))
+                    if fingerprint is None:
+                        fingerprint = job.legacy_fingerprint
+                        if fingerprint in occupied:
+                            suffix = 0
+                            while fingerprint in occupied:
+                                fingerprint = sha256(
+                                    f"{job.legacy_fingerprint}|{source_key}|{suffix}".encode()
+                                ).hexdigest()
+                                suffix += 1
+                    connection.execute(
+                        "INSERT INTO job_identities VALUES (?,?)", (source_key, fingerprint)
+                    )
+                    mapped[source_key] = fingerprint
+                    occupied.add(fingerprint)
+                    if job.url:
+                        by_url[(job.url, job.legacy_fingerprint)] = fingerprint
+                job.resolved_fingerprint = fingerprint
 
     def upsert_jobs(self, jobs: list[Job]) -> set[str]:
+        self.resolve_identities(jobs)
         now = utcnow().isoformat()
         inserted: set[str] = set()
         with self._connect() as connection:
             for job in jobs:
-                payload = json.dumps(asdict(job), ensure_ascii=False, default=str)
+                data = asdict(job)
+                data.pop("resolved_fingerprint")
+                payload = json.dumps(data, ensure_ascii=False, default=str)
                 cursor = connection.execute(
                     """
                     INSERT OR IGNORE INTO jobs (
@@ -104,13 +178,17 @@ class JobRepository:
                 else:
                     connection.execute(
                         """
-                        UPDATE jobs SET source = ?, source_id = ?, url = ?, score = ?,
+                        UPDATE jobs SET source = ?, source_id = ?, title = ?, company = ?,
+                            location = ?, url = ?, score = ?,
                             published_at = COALESCE(?, published_at), last_seen_at = ?, payload = ?
                         WHERE fingerprint = ?
                         """,
                         (
                             job.source,
                             job.source_id,
+                            job.title,
+                            job.company,
+                            job.location,
                             job.url,
                             job.score,
                             job.published_at.isoformat() if job.published_at else None,

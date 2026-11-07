@@ -333,7 +333,7 @@ def render_reference(content: bytes, dimensions: list[tuple[float, float]]) -> d
         if len(document) != len(dimensions):
             raise PdfTemplateError("PDF parsers disagree on page count")
         for index, (width, height) in enumerate(dimensions):
-            scale = min(2, MAX_REFERENCE_SIDE / max(width, height))
+            scale = min(2, (MAX_REFERENCE_SIDE - 1) / max(width, height))
             pixels += math.ceil(width * scale) * math.ceil(height * scale)
             if pixels > MAX_REFERENCE_PIXELS:
                 raise PdfTemplateError("PDF preview pixel limit exceeded")

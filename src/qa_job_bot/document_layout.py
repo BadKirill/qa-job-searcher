@@ -28,6 +28,66 @@ def color(value):
     return value
 
 
+def monochrome(value, maximum=96):
+    checked = color(value)
+    channels = [int(checked[offset : offset + 2], 16) for offset in (1, 3, 5)]
+    shade = min(channels[0], maximum) if len(set(channels)) == 1 else maximum
+    return "#" + f"{shade:02X}" * 3
+
+
+def cover_letter_style():
+    body = {
+        "font_name": "Arial",
+        "font_size": 10.2,
+        "line_spacing": 14.2,
+        "space_before": 0,
+        "space_after": 10,
+        "bold": False,
+        "italic": False,
+        "color": "#606060",
+        "alignment": "left",
+    }
+    return {
+        "font_size": 10.2,
+        "page_width": 595.2756,
+        "page_height": 841.8898,
+        "margin_left": 68.3622,
+        "margin_right": 68.3622,
+        "margin_top": 60,
+        "margin_bottom": 60,
+        "typography": {
+            "body": body,
+            "entry": body.copy(),
+            "italic": body.copy(),
+            "title": body
+            | {
+                "font_size": 19,
+                "line_spacing": 23,
+                "space_after": 1,
+                "bold": True,
+                "color": "#1A1A1A",
+                "alignment": "center",
+            },
+            "header": body
+            | {
+                "font_size": 8.8,
+                "line_spacing": 10.8,
+                "space_after": 7,
+                "alignment": "center",
+            },
+            "heading": body
+            | {
+                "font_size": 14,
+                "line_spacing": 18,
+                "space_after": 10,
+                "bold": True,
+                "color": "#1A1A1A",
+                "rule": {"color": "#B5B5B5", "width": 0.55},
+            },
+        },
+    }
+
+
 def typography(style, geometry):
     body_size = geometry["font_size"]
     result = {}
@@ -46,12 +106,12 @@ def typography(style, geometry):
             "space_after": bounded(raw.get("space_after", 9), 0, 40),
             "bold": bool(raw.get("bold", role in {"title", "heading", "entry"})),
             "italic": bool(raw.get("italic", role == "italic")),
-            "color": color(raw.get("color", "#000000")),
+            "color": monochrome(raw.get("color", "#000000")),
             "alignment": alignment,
         }
         if rule := raw.get("rule"):
             result[role]["rule"] = {
-                "color": color(rule["color"]),
+                "color": monochrome(rule["color"], 181),
                 "width": bounded(rule["width"], 0.1, 3),
             }
     return result
@@ -113,13 +173,13 @@ def pdf_style(role, spec, unicode_font, text):
         spaceAfter=spec["space_after"],
         alignment=ALIGNMENTS[spec["alignment"]],
         textColor=HexColor(spec["color"]),
-        keepWithNext=role in {"title", "heading", "entry"},
+        keepWithNext=role in {"title", "header", "heading", "entry", "italic"},
         allowWidows=0,
         allowOrphans=0,
     )
 
 
-def docx_style(style, spec):
+def docx_style(style, spec, keep_with_next=False):
     font = style.font
     font.name = spec["font_name"].split("+")[-1]
     font.size = Pt(spec["font_size"])
@@ -134,6 +194,7 @@ def docx_style(style, spec):
     layout.line_spacing = Pt(spec["line_spacing"])
     layout.space_before = Pt(spec["space_before"])
     layout.space_after = Pt(spec["space_after"])
+    layout.keep_with_next = keep_with_next
 
 
 def docx_rule(paragraph, rule):

@@ -83,6 +83,7 @@ class JobSearchService:
                     errors.append(error)
 
             ranked = rank_jobs(all_jobs, self.profile)
+            self.repository.resolve_identities(ranked)
             unique = list({job.fingerprint: job for job in reversed(ranked)}.values())
             unique.sort(
                 key=lambda job: (job.score, job.published_at is not None, job.published_at),

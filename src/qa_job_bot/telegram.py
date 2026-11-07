@@ -166,7 +166,7 @@ class TelegramBot:
                 await asyncio.sleep(3)
 
     def _authorized(self, user_id: int) -> bool:
-        return not self.settings.allowed_user_ids or user_id in self.settings.allowed_user_ids
+        return user_id in self.settings.allowed_user_ids
 
     async def _handle_update(self, update: dict[str, Any]) -> None:
         message = update.get("message") or {}

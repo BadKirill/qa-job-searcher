@@ -108,6 +108,8 @@ async def test_ashby_parser() -> None:
 
 
 async def test_himalayas_parser_and_query_deduplication() -> None:
+    assert "manual qa" in HimalayasSource.queries
+    assert "full stack qa" in HimalayasSource.queries
     client = await client_for(
         {
             "jobs": [
@@ -156,6 +158,8 @@ async def test_himalayas_excludes_other_continents_only() -> None:
 
 
 async def test_remote_com_parser_uses_public_api_and_details() -> None:
+    assert "manual qa" in RemoteComSource.queries
+    assert "full stack qa" in RemoteComSource.queries
     listing = {
         "data": {
             "jobs": [

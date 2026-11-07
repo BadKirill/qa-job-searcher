@@ -18,8 +18,6 @@ async def async_main() -> None:
     )
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
-    if not settings.allowed_user_ids:
-        logging.warning("TELEGRAM_ALLOWED_USER_IDS is empty: anyone who finds the bot can use it")
     profile = load_profile(settings.search_profile_path)
     boards = load_boards(settings.job_boards_path)
     telegram_channels = load_telegram_channels(settings.telegram_channels_path)

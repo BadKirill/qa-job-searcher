@@ -16,6 +16,8 @@ class RemoteComSource(JobSource):
     endpoint = "https://talent-api.remote.com/api/v1/public/jobs"
     queries = (
         "qa engineer",
+        "manual qa",
+        "full stack qa",
         "qa lead",
         "sdet",
         "quality engineer",

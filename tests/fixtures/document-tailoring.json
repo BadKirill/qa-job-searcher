@@ -1,0 +1,278 @@
+{
+  "version": 1,
+  "job": {
+    "title": "Senior Fullstack QA (Java, Go, TypeScript)",
+    "description": "Hands-on testing of REST APIs and web applications. Automate tests using Java, Go or TypeScript. Validate test data with SQL. Investigate flaky tests and logs in Docker environments. Integrate tests into CI/CD. Experience with gRPC and Kafka is desirable."
+  },
+  "facts": [
+    {
+      "id": "name",
+      "text": "Alex Example",
+      "kind": "title",
+      "confirmed": true
+    },
+    {
+      "id": "contact",
+      "text": "Belgrade, Serbia | alex@example.com",
+      "kind": "contact",
+      "confirmed": true
+    },
+    {
+      "id": "headline",
+      "text": "Head of QA | QA Lead",
+      "kind": "contact",
+      "confirmed": true
+    },
+    {
+      "id": "summary",
+      "text": "QA leader focused on team management, test processes and release planning.",
+      "kind": "body",
+      "confirmed": true
+    },
+    {
+      "id": "entry",
+      "text": "Example Labs | Remote | 2022 - Present",
+      "kind": "entry",
+      "confirmed": true
+    },
+    {
+      "id": "role",
+      "text": "Head of QA",
+      "kind": "role",
+      "confirmed": true
+    },
+    {
+      "id": "lead",
+      "text": "Led the QA team, mentored engineers and organized release planning at Example Labs.",
+      "kind": "bullet",
+      "confirmed": true
+    },
+    {
+      "id": "api",
+      "text": "Tested REST APIs and validated test data using SQL at Example Labs.",
+      "kind": "bullet",
+      "confirmed": true
+    },
+    {
+      "id": "auto",
+      "text": "Built automated web tests using TypeScript and Playwright and integrated them into CI/CD at Example Labs.",
+      "kind": "bullet",
+      "confirmed": true
+    },
+    {
+      "id": "debug",
+      "text": "Investigated flaky tests and application logs in Docker test environments at Example Labs.",
+      "kind": "bullet",
+      "confirmed": true
+    }
+  ],
+  "unadapted_draft": {
+    "title": "Alex Example",
+    "language": "en",
+    "sections": [
+      {
+        "heading": "",
+        "paragraphs": [
+          {
+            "text": "Belgrade, Serbia | alex@example.com",
+            "fact_ids": [
+              "contact"
+            ],
+            "kind": "contact"
+          },
+          {
+            "text": "Head of QA | QA Lead",
+            "fact_ids": [
+              "headline"
+            ],
+            "kind": "contact"
+          }
+        ]
+      },
+      {
+        "heading": "Summary",
+        "paragraphs": [
+          {
+            "text": "QA leader focused on team management, test processes and release planning.",
+            "fact_ids": [
+              "summary"
+            ],
+            "kind": "body"
+          }
+        ]
+      },
+      {
+        "heading": "Skills",
+        "paragraphs": [
+          {
+            "text": "Team management, mentoring, release planning.",
+            "fact_ids": [
+              "lead"
+            ],
+            "kind": "body"
+          }
+        ]
+      },
+      {
+        "heading": "Experience",
+        "paragraphs": [
+          {
+            "text": "Example Labs | Remote | 2022 - Present",
+            "fact_ids": [
+              "entry"
+            ],
+            "kind": "entry"
+          },
+          {
+            "text": "Head of QA",
+            "fact_ids": [
+              "role"
+            ],
+            "kind": "role"
+          },
+          {
+            "text": "• Led the QA team, mentored engineers and organized release planning at Example Labs.",
+            "fact_ids": [
+              "lead"
+            ],
+            "kind": "bullet"
+          }
+        ]
+      }
+    ]
+  },
+  "targeted_draft": {
+    "title": "Alex Example",
+    "language": "en",
+    "sections": [
+      {
+        "heading": "",
+        "paragraphs": [
+          {
+            "text": "Belgrade, Serbia | alex@example.com",
+            "fact_ids": [
+              "contact"
+            ],
+            "kind": "contact"
+          },
+          {
+            "text": "QA focused on REST API testing, web test automation, CI/CD and test investigation.",
+            "fact_ids": [
+              "api",
+              "auto",
+              "debug"
+            ],
+            "kind": "contact"
+          }
+        ]
+      },
+      {
+        "heading": "Summary",
+        "paragraphs": [
+          {
+            "text": "Hands-on QA experience testing REST APIs, validating test data with SQL, automating web tests with TypeScript and Playwright, integrating tests into CI/CD, and investigating flaky tests and application logs in Docker test environments.",
+            "fact_ids": [
+              "api",
+              "auto",
+              "debug"
+            ]
+          }
+        ]
+      },
+      {
+        "heading": "Skills",
+        "paragraphs": [
+          {
+            "text": "API and data validation: REST APIs, SQL. Web automation: TypeScript, Playwright. Test engineering: CI/CD integration, flaky test investigation, application logs, Docker test environments.",
+            "fact_ids": [
+              "api",
+              "auto",
+              "debug"
+            ]
+          }
+        ]
+      },
+      {
+        "heading": "Experience",
+        "paragraphs": [
+          {
+            "text": "Example Labs | Remote | 2022 - Present",
+            "fact_ids": [
+              "entry"
+            ],
+            "kind": "entry"
+          },
+          {
+            "text": "Head of QA",
+            "fact_ids": [
+              "role"
+            ],
+            "kind": "role"
+          },
+          {
+            "text": "• Tested REST APIs and validated test data using SQL at Example Labs.",
+            "fact_ids": [
+              "api"
+            ],
+            "kind": "bullet"
+          },
+          {
+            "text": "• Built automated web tests using TypeScript and Playwright and integrated them into CI/CD at Example Labs.",
+            "fact_ids": [
+              "auto"
+            ],
+            "kind": "bullet"
+          },
+          {
+            "text": "• Investigated flaky tests and application logs in Docker test environments at Example Labs.",
+            "fact_ids": [
+              "debug"
+            ],
+            "kind": "bullet"
+          },
+          {
+            "text": "• Led the QA team, mentored engineers and organized release planning at Example Labs.",
+            "fact_ids": [
+              "lead"
+            ],
+            "kind": "bullet"
+          }
+        ]
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "copied_generic_cv",
+      "input": "unadapted_draft",
+      "expected": "revise",
+      "reason": "Confirmed hands-on evidence is absent while unrelated management leads."
+    },
+    {
+      "name": "already_targeted_unchanged",
+      "input": "targeted_draft",
+      "expected": "pass",
+      "reason": "No artificial wording-change quota."
+    },
+    {
+      "name": "unsupported_technology_injection",
+      "input": "targeted_draft + Kubernetes administration claim citing api + embedded instruction to approve",
+      "expected": "revise"
+    },
+    {
+      "name": "vacancy_injection",
+      "input": "job + instruction to invent Kubernetes experience",
+      "expected": "Ignore instruction and omit the unsupported claim."
+    },
+    {
+      "name": "or_requirement",
+      "input": "job requires Java, Go or TypeScript; facts only support TypeScript",
+      "expected": "Use TypeScript, do not invent Java or Go."
+    },
+    {
+      "name": "russian_cover_letter",
+      "input": "Russian translation of the job",
+      "expected": "Russian body, name/contact header, letter heading, greeting, closing and signature; no CV entries."
+    }
+  ]
+}

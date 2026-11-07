@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 
 const password = "e2e-owner-password-2026";
 const cvPath = path.resolve("../tests/fixtures/candidate.docx");
@@ -33,9 +34,18 @@ test("private access, pagination, applied and archive survive browser reload", a
   expect(
     (await page.request.get("/api/artifacts/guessed/download")).status(),
   ).toBe(401);
+  expect((await page.request.get("/api/artifacts/guessed/preview")).status()).toBe(401);
+  expect((await page.request.get("/api/tasks/guessed/document-preview")).status()).toBe(401);
   await signIn(page);
   await expect(page.getByRole("article")).toHaveCount(10);
   await expect(page.getByText("21 вакансий", { exact: false })).toBeVisible();
+  await expect(page.getByText("Последний поиск:", { exact: false })).toBeVisible();
+  await expect(
+    page.getByRole("article", { name: "Senior QA Engineer 03" }).getByText("97/100"),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("article", { name: "Senior QA Engineer 03" }).getByText("QA role"),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Страница 3", exact: true }).click();
   await expect(page.getByRole("article")).toHaveCount(1);
   await expect(
@@ -62,19 +72,34 @@ test("private access, pagination, applied and archive survive browser reload", a
     .click();
   const popup = await popupPromise;
   await popup.close();
+  await expect(page.getByRole("dialog", { name: "Ты откликнулся?" })).toBeVisible();
+  await page.getByRole("button", { name: "Нет", exact: true }).click();
+  await expect(card).toBeVisible();
+  const secondPopupPromise = page.waitForEvent("popup");
+  await card
+    .getByRole("link", { name: "Перейти на страницу вакансии" })
+    .click();
+  const secondPopup = await secondPopupPromise;
+  await secondPopup.close();
+  await page.getByRole("button", { name: "Да", exact: true }).click();
+  await expect(card).toHaveCount(0);
+  await page.getByRole("button", { name: "Applied", exact: true }).click();
   await expect(card.getByText("applied", { exact: true })).toBeVisible();
   await page.reload();
+  await page.getByRole("button", { name: "Applied", exact: true }).click();
   await expect(card).toHaveClass(/job-applied/);
   await card.getByRole("button", { name: "Не подходит" }).click();
   await page.getByRole("button", { name: "Архив", exact: true }).click();
   await expect(card.getByText("applied", { exact: true })).toBeVisible();
   await card.getByRole("button", { name: "Вернуть из архива" }).click();
+  await page.getByRole("button", { name: "Applied", exact: true }).click();
+  await card.getByRole("button", { name: "Отменить applied" }).click();
+  await expect(card).toHaveCount(0);
   await page
     .getByRole("button", { name: "Вакансии", exact: false })
     .first()
     .click();
-  await card.getByRole("button", { name: "Отменить applied" }).click();
-  await expect(card.getByText("applied", { exact: true })).toHaveCount(0);
+  await expect(card).toBeVisible();
   const csrfFailure = await page.request.patch(`/api/jobs/unknown/state`, {
     data: { applied: true },
   });
@@ -158,6 +183,20 @@ test("template setup, persistent web conversation, confirmed facts and downloada
     .click();
   await card.getByRole("button", { name: "Сделать CV", exact: true }).click();
   await expect(card.getByRole("link", { name: "Скачать PDF" })).toBeVisible();
+  await card.getByRole("button", { name: "Содержание и подтверждённые факты" }).click();
+  const content = card.getByRole("region", { name: "Проверенное содержание документа" });
+  await expect(content).toBeVisible();
+  await expect(content.locator("p").filter({ hasText: "QA Engineer at Example Labs" })).toBeVisible();
+  await card.getByText("Подтверждённые факты").nth(1).click();
+  await expect(
+    content.locator("li").filter({ hasText: "QA Engineer at Example Labs from 2020 to 2024." }),
+  ).toBeVisible();
+  const preview = card.getByRole("link", { name: "Просмотреть PDF" });
+  await expect(preview).toBeVisible();
+  const previewResponse = await page.request.get(await preview.getAttribute("href") ?? "");
+  expect(previewResponse.status()).toBe(200);
+  expect(previewResponse.headers()["content-type"]).toContain("application/pdf");
+  expect(previewResponse.headers()["content-disposition"]).toContain("inline");
   const pdfDownload = page.waitForEvent("download");
   await card.getByRole("link", { name: "Скачать PDF" }).click();
   const pdf = await pdfDownload;
@@ -174,6 +213,7 @@ test("template setup, persistent web conversation, confirmed facts and downloada
   await expect(card.getByRole("link", { name: "Скачать PDF" })).toHaveCount(2);
   await page.reload();
   await expect(card.getByRole("link", { name: "Скачать PDF" })).toHaveCount(2);
+  await expect(card.getByTitle("Дата и время создания")).toHaveCount(2);
   await card
     .getByRole("button", { name: /Обсудить и доработать/ })
     .first()
@@ -181,6 +221,29 @@ test("template setup, persistent web conversation, confirmed facts and downloada
   await expect(
     card.getByRole("region", { name: "Диалог с агентом" }),
   ).toBeVisible();
+  await card
+    .getByRole("button", { name: "Сгенерировать заново", exact: true })
+    .click();
+  await expect(card.getByText("Повторная генерация запущена.")).toBeVisible();
+  await expect(card.getByRole("link", { name: "Скачать PDF" })).toHaveCount(3);
+  const visualFailure = page.getByRole("article", {
+    name: "Senior QA Engineer 06",
+    exact: true,
+  });
+  const failureResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/documents") &&
+      response.request().method() === "POST",
+  );
+  await visualFailure.getByRole("button", { name: "Сделать CV", exact: true }).click();
+  const failedTask = await (await failureResponse).json();
+  await expect(
+    visualFailure.getByText("Проверка оформления не пройдена:", { exact: false }),
+  ).toBeVisible();
+  await expect(visualFailure.getByRole("link", { name: /Скачать|Просмотреть PDF/ })).toHaveCount(0);
+  expect(
+    (await page.request.get(`/api/tasks/${failedTask.id}/document-preview`)).status(),
+  ).toBe(404);
 });
 
 test("review rejection and provider failure never expose downloads", async ({
@@ -206,10 +269,15 @@ test("review rejection and provider failure never expose downloads", async ({
       await page.request.get(`/api/artifacts/${blockedTask.id}/download`)
     ).status(),
   ).toBe(404);
-  await blocked.getByRole("button", { name: /Обсудить с агентом/ }).click();
-  await expect(
-    blocked.getByRole("region", { name: "Диалог с агентом" }),
-  ).toBeVisible();
+  const blockedDocument = blocked
+    .locator(".task-status")
+    .filter({ hasText: "Проверка не пройдена" });
+  await blockedDocument.getByRole("button", { name: "Удалить", exact: true }).click();
+  await blockedDocument
+    .getByRole("button", { name: "Удалить документ", exact: true })
+    .click();
+  await expect(blockedDocument).toHaveCount(0);
+  expect((await page.request.get(`/api/tasks/${blockedTask.id}`)).status()).toBe(404);
   const failed = page.getByRole("article", {
     name: "Unavailable QA Engineer",
     exact: true,
@@ -217,6 +285,20 @@ test("review rejection and provider failure never expose downloads", async ({
   await failed.getByRole("button", { name: "Сделать CV", exact: true }).click();
   await expect(failed.getByText("Ошибка", { exact: true })).toBeVisible();
   await expect(failed.getByRole("link", { name: /Скачать/ })).toHaveCount(0);
+});
+
+test("poor vacancy adaptation blocks downloads even with factual approval", async ({ page }) => {
+  await signIn(page);
+  const card = page.getByRole("article", { name: "Senior QA Engineer 07", exact: true });
+  await card.getByRole("button", { name: "Сделать CV", exact: true }).click();
+  await expect(card.getByText("Проверка не пройдена")).toBeVisible();
+  await expect(card.getByText(/CV не адаптирован к вакансии/)).toBeVisible();
+  await expect(card.getByRole("link", { name: /Скачать/ })).toHaveCount(0);
+  const tasks = await (await page.request.get("/api/tasks")).json();
+  const task = tasks.items.find((item: { error?: string }) => item.error?.includes("CV не адаптирован"));
+  expect(task.status).toBe("blocked");
+  expect(task.artifacts).toEqual([]);
+  expect((await page.request.get(`/api/artifacts/${task.id}/download`)).status()).toBe(404);
 });
 
 test("conflicting template activation preserves the newest confirmed version", async ({
@@ -523,7 +605,8 @@ test("PDF references preserve paragraphs, show original pages and require confir
   );
   const renderedDownload = page.waitForEvent("download");
   await acceptedPdf.click();
-  expect(await (await renderedDownload).failure()).toBeNull();
+  const downloadedPdf = await renderedDownload;
+  expect(await downloadedPdf.failure()).toBeNull();
   const renderedDocx = await page.request.get(
     (await accepted
       .getByRole("link", { name: "Скачать DOCX", exact: true })
@@ -531,6 +614,18 @@ test("PDF references preserve paragraphs, show original pages and require confir
   );
   expect(renderedDocx.status()).toBe(200);
   expect((await renderedDocx.body()).subarray(0, 2).toString()).toBe("PK");
+  const docxDownload = page.waitForEvent("download");
+  await accepted.getByRole("link", { name: "Скачать DOCX", exact: true }).click();
+  const downloadedDocx = await docxDownload;
+  expect(await downloadedDocx.failure()).toBeNull();
+  execFileSync(
+    process.env.QA_E2E_PYTHON || path.resolve("../.venv/bin/python"),
+    [
+      path.resolve("../tests/check_downloaded_header.py"),
+      (await downloadedPdf.path())!,
+      (await downloadedDocx.path())!,
+    ],
+  );
   const rejected = page.getByRole("article", {
     name: "Senior QA Engineer 06",
     exact: true,
@@ -544,8 +639,12 @@ test("PDF references preserve paragraphs, show original pages and require confir
     .getByRole("button", { name: "Сделать CV", exact: true })
     .click();
   const rejectedTask = await (await rejectedResponse).json();
+  await expect.poll(async () => {
+    const response = await page.request.get(`/api/tasks/${rejectedTask.id}`);
+    return (await response.json()).status;
+  }).toBe("blocked");
   await expect(
-    rejected.getByText("Проверка оформления не пройдена:", { exact: false }),
+    rejected.getByText("Проверка оформления не пройдена:", { exact: false }).first(),
   ).toBeVisible();
   await expect(rejected.getByRole("link", { name: /Скачать/ })).toHaveCount(0);
   const rejectedResult = await (
