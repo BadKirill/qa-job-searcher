@@ -14,10 +14,11 @@ from qa_job_bot.config import Settings, load_boards, load_profile, load_telegram
 from qa_job_bot.document_files import DocumentFileError, parse_template, render_documents
 from qa_job_bot.document_policy import (
     PolicyViolation,
+    bind_visual_review,
     content_hash,
+    template_visual_reference,
     validate_draft,
     validate_review,
-    validate_visual_review,
 )
 from qa_job_bot.service import JobSearchService, build_sources
 from qa_job_bot.web_security import WebSettings
@@ -111,82 +112,99 @@ class Worker:
         if context["template"].get("style", {}).get("source_format") == "pdf" and not reference:
             raise PolicyViolation("Перечитайте PDF в профиле и подтвердите целые абзацы эталона.")
         context["language"] = "en" if task["kind"] == "cv" else vacancy_language(context["job"])
+        directory = self.settings.data_dir / "artifacts" / task["id"]
         for attempt in range(3):
-            draft = validate_draft(await self.gateway.generate(context), context)
+            try:
+                draft = validate_draft(await self.gateway.generate(context), context)
+            except PolicyViolation as error:
+                if attempt == 2:
+                    raise
+                context["revision_feedback"] = [str(error)]
+                continue
             generator_metadata = dict(getattr(self.gateway, "last_run_metadata", {}))
+            context["revision_draft"] = draft
             if not self.transition(task, "verifying"):
                 return
             review = validate_review(await self.gateway.review(context, draft), draft, context)
             reviewer_metadata = dict(getattr(self.gateway, "last_run_metadata", {}))
-            if review["verdict"] == "pass":
-                break
             if review["verdict"] == "needs_input":
                 self.transition(task, "needs_input", error="; ".join(review["issues"]))
                 return
-            if attempt == 2:
-                self.transition(task, "blocked", error="; ".join(review["issues"]))
+            if review["verdict"] == "revise":
+                if attempt == 2:
+                    self.transition(task, "blocked", error="; ".join(review["issues"]))
+                    return
+                context["revision_feedback"] = review["issues"]
+                continue
+            if not self.transition(task, "rendering"):
                 return
-            context["revision_feedback"] = review["issues"]
-        if not self.transition(task, "rendering"):
-            return
-        directory = self.settings.data_dir / "artifacts" / task["id"]
-        files = await asyncio.to_thread(render_documents, draft, context["template"], directory)
-        file_hashes = {}
-        for file in files:
-            path = Path(file["path"]).resolve()
-            if not path.is_relative_to(directory.resolve()):
-                raise DocumentFileError("Недопустимый путь документа.")
-            file_hashes[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
-        visual_review = None
-        visual_reviewer_metadata = None
-        if reference:
+            files = await asyncio.to_thread(
+                render_documents, draft, context["template"], directory, task["kind"]
+            )
+            file_hashes = {}
+            for file in files:
+                path = Path(file["path"]).resolve()
+                if not path.is_relative_to(directory.resolve()):
+                    raise DocumentFileError("Недопустимый путь документа.")
+                file_hashes[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
             pdf_path = next(Path(file["path"]) for file in files if file["format"] == "pdf")
             pdf_content = pdf_path.read_bytes()
             if hashlib.sha256(pdf_content).hexdigest() != file_hashes[str(pdf_path.resolve())]:
                 raise DocumentFileError("Документ изменился после рендеринга.")
             rendered = await asyncio.to_thread(parse_template, pdf_content, "result.pdf")
-            visual_review = validate_visual_review(
+            visual_review = bind_visual_review(
                 await self.gateway.visual_review(context, draft, rendered["reference"]),
                 draft,
-                reference,
+                template_visual_reference(context["template"]),
                 rendered["reference"],
             )
             visual_reviewer_metadata = dict(getattr(self.gateway, "last_run_metadata", {}))
-        if not self.transition(task, "rendering"):
-            return
-        artifact_ids = []
-        for file in files:
-            path = Path(file["path"]).resolve()
-            if hashlib.sha256(path.read_bytes()).hexdigest() != file_hashes[str(path)]:
-                raise DocumentFileError("Документ изменился после проверки.")
-        for file in files:
-            path = Path(file["path"]).resolve()
-            artifact = self.store.add_artifact(
-                task["id"],
-                {
-                    "filename": file["filename"],
-                    "format": file["format"],
-                    "path": str(path),
-                    "sha256": file_hashes[str(path)],
+            if visual_review["verdict"] == "revise":
+                visual_error = "Проверка оформления не пройдена: " + "; ".join(
+                    visual_review["issues"]
+                )
+                if attempt == 2:
+                    self.transition(task, "blocked", error=visual_error)
+                    return
+                context["revision_feedback"] = [visual_error]
+                continue
+            if not self.transition(task, "rendering"):
+                return
+            for file in files:
+                path = Path(file["path"]).resolve()
+                if hashlib.sha256(path.read_bytes()).hexdigest() != file_hashes[str(path)]:
+                    raise DocumentFileError("Документ изменился после проверки.")
+            artifact_ids = []
+            for file in files:
+                path = Path(file["path"]).resolve()
+                artifact = self.store.add_artifact(
+                    task["id"],
+                    {
+                        "filename": file["filename"],
+                        "format": file["format"],
+                        "path": str(path),
+                        "sha256": file_hashes[str(path)],
+                        "draft_hash": content_hash(draft),
+                    },
+                )
+                artifact_ids.append(artifact["id"])
+            self.transition(
+                task,
+                "ready",
+                result={
+                    "verified": True,
                     "draft_hash": content_hash(draft),
+                    "approved_draft": draft,
+                    "review": review,
+                    "artifact_ids": artifact_ids,
+                    "template_version": context["template"]["version"],
+                    "generator": generator_metadata,
+                    "reviewer": reviewer_metadata,
+                    "visual_review": visual_review,
+                    "visual_reviewer": visual_reviewer_metadata,
                 },
             )
-            artifact_ids.append(artifact["id"])
-        self.transition(
-            task,
-            "ready",
-            result={
-                "verified": True,
-                "draft_hash": content_hash(draft),
-                "review": review,
-                "artifact_ids": artifact_ids,
-                "template_version": context["template"]["version"],
-                "generator": generator_metadata,
-                "reviewer": reviewer_metadata,
-                "visual_review": visual_review,
-                "visual_reviewer": visual_reviewer_metadata,
-            },
-        )
+            return
 
     async def run(self, stop: asyncio.Event, interval: int = 10800) -> None:
         while not stop.is_set():

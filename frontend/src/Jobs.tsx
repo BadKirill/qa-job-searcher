@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { errorMessage, isPending, request, requestId, safeJobUrl } from "./api";
 import { Chat } from "./Chat";
-import { Icon, Loading, Notice, TaskStatus } from "./components";
+import { formatCreatedAt, Icon, Loading, Notice, TaskStatus } from "./components";
 import type { Job, JobPage, Task } from "./types";
 
 export function JobCard({
@@ -22,8 +22,14 @@ export function JobCard({
   revision: number;
 }) {
   const [busy, setBusy] = useState("");
+  const [deletingTask, setDeletingTask] = useState("");
   const [error, setError] = useState("");
+  const [confirmingApplied, setConfirmingApplied] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const declineApplied = useRef<HTMLButtonElement>(null);
+  const [chatDocumentKind, setChatDocumentKind] = useState<
+    "cv" | "cover_letter"
+  >("cv");
   const documents = [
     ...job.documents.filter(
       (document) => !tasks.some((task) => task.id === document.id),
@@ -34,8 +40,17 @@ export function JobCard({
     ),
   ];
   const url = safeJobUrl(job.url);
+  useEffect(() => {
+    if (!confirmingApplied) return;
+    declineApplied.current?.focus();
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busy) setConfirmingApplied(false);
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [busy, confirmingApplied]);
   async function state(value: { applied?: boolean; archived?: boolean }) {
-    if (busy) return;
+    if (busy) return false;
     setBusy("state");
     setError("");
     try {
@@ -44,8 +59,10 @@ export function JobCard({
         body: value,
       });
       onState();
+      return true;
     } catch (failure) {
       setError(errorMessage(failure));
+      return false;
     } finally {
       setBusy("");
     }
@@ -86,6 +103,21 @@ export function JobCard({
       setError(errorMessage(failure));
     }
   }
+  async function remove(taskId: string) {
+    if (deletingTask) return;
+    setDeletingTask(taskId);
+    setError("");
+    try {
+      await request(`/tasks/${encodeURIComponent(taskId)}`, {
+        method: "DELETE",
+      });
+      onTask();
+    } catch (failure) {
+      setError(errorMessage(failure));
+    } finally {
+      setDeletingTask("");
+    }
+  }
   return (
     <article
       className={`job-card${job.applied_at ? " job-applied" : ""}`}
@@ -114,6 +146,17 @@ export function JobCard({
       <div className="job-title-row">
         <h2>{job.title}</h2>
         {job.salary && <span className="salary">{job.salary}</span>}
+      </div>
+      <div className="job-match" aria-label="Причины подбора">
+        <strong>{job.score}/100</strong>
+        <span>Рейтинг по фильтрам</span>
+        {job.match_reasons?.length > 0 && (
+          <ul>
+            {job.match_reasons.slice(0, 3).map((reason, index) => (
+              <li key={`${reason}-${index}`}>{reason}</li>
+            ))}
+          </ul>
+        )}
       </div>
       {(job.details.qa_types.length > 0 ||
         job.details.languages.length > 0 ||
@@ -211,7 +254,7 @@ export function JobCard({
                 event.preventDefault();
                 return;
               }
-              void state({ applied: true });
+              setConfirmingApplied(true);
             }}
           >
             Перейти на страницу вакансии
@@ -227,8 +270,13 @@ export function JobCard({
             <TaskStatus
               key={task.id}
               task={task}
-              onDiscuss={() => setChatOpen(true)}
+              onDiscuss={() => {
+                setChatDocumentKind(task.kind as "cv" | "cover_letter");
+                setChatOpen(true);
+              }}
               onCancel={() => void cancel(task.id)}
+              onDelete={() => void remove(task.id)}
+              deleting={deletingTask === task.id}
             />
           ))}
         </div>
@@ -255,9 +303,50 @@ export function JobCard({
       {chatOpen && (
         <Chat
           jobId={job.id}
+          documentKind={chatDocumentKind}
           revision={revision}
+          onGenerated={onTask}
           onClose={() => setChatOpen(false)}
         />
+      )}
+      {confirmingApplied && (
+        <div className="modal-backdrop">
+          <section
+            className="confirmation-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`applied-question-${job.id}`}
+          >
+            <p className="eyebrow">СТАТУС ВАКАНСИИ</p>
+            <h2 id={`applied-question-${job.id}`}>Ты откликнулся?</h2>
+            <p className="muted">
+              Если да, вакансия перейдёт из общего списка во вкладку Applied.
+            </p>
+            <div className="confirmation-actions">
+              <button
+                type="button"
+                className="button primary"
+                disabled={!!busy}
+                onClick={async () => {
+                  if (await state({ applied: true })) {
+                    setConfirmingApplied(false);
+                  }
+                }}
+              >
+                {busy ? "Сохраняем…" : "Да"}
+              </button>
+              <button
+                ref={declineApplied}
+                type="button"
+                className="button secondary"
+                disabled={!!busy}
+                onClick={() => setConfirmingApplied(false)}
+              >
+                Нет
+              </button>
+            </div>
+          </section>
+        </div>
       )}
     </article>
   );
@@ -271,7 +360,7 @@ export function Jobs({
   onProfile,
   onTask,
 }: {
-  tab: "active" | "archive";
+  tab: "active" | "applied" | "archive";
   revision: number;
   tasks: Task[];
   hasTemplate: boolean;
@@ -342,22 +431,35 @@ export function Jobs({
   const searchTask = tasks.find(
     (task) => task.kind === "search" && isPending(task.status),
   );
+  const headings = {
+    active: {
+      eyebrow: "ВАШ СЛЕДУЮЩИЙ ШАГ",
+      title: "Подходящие вакансии",
+      description: "Возможности, с которых хочется начать разговор.",
+    },
+    applied: {
+      eyebrow: "ВАШИ ОТКЛИКИ",
+      title: "Applied",
+      description: "Вакансии, на которые вы уже откликнулись.",
+    },
+    archive: {
+      eyebrow: "ВСЁ ПОД КОНТРОЛЕМ",
+      title: "Архив вакансий",
+      description: "Вакансии, которые вы отложили. Любую можно вернуть.",
+    },
+  }[tab];
   return (
     <div>
       <div className="page-heading">
         <div>
           <p className="eyebrow">
-            {tab === "active" ? "ВАШ СЛЕДУЮЩИЙ ШАГ" : "ВСЁ ПОД КОНТРОЛЕМ"}
+            {headings.eyebrow}
           </p>
           <h1>
-            {tab === "active" ? "Подходящие вакансии" : "Архив вакансий"}
+            {headings.title}
             <span className="heading-dot">.</span>
           </h1>
-          <p className="muted">
-            {tab === "active"
-              ? "Возможности, с которых хочется начать разговор."
-              : "Вакансии, которые вы отложили. Любую можно вернуть."}
-          </p>
+          <p className="muted">{headings.description}</p>
         </div>
         {tab === "active" && (
           <button
@@ -375,7 +477,15 @@ export function Jobs({
           {result ? `${result.total} вакансий` : "Ваши вакансии"}
           <span className="dot-separator">·</span>По 10 на странице
         </span>
-        <span>Сначала наиболее подходящие</span>
+        <span>
+          {result?.last_search_at
+            ? `Последний поиск: ${formatCreatedAt(result.last_search_at)}`
+            : "Поиск ещё не завершался"}
+          {result?.snapshot_at &&
+            result.last_search_at &&
+            new Date(result.snapshot_at).getTime() < new Date(result.last_search_at).getTime() &&
+            " · Просматривается сохранённый снимок"}
+        </span>
       </div>
       {error && (
         <Notice>
@@ -395,8 +505,7 @@ export function Jobs({
       )}
       {undo && (
         <Notice tone="success" onClose={() => setUndo(false)}>
-          Изменения сохранены. Вернуть вакансию можно в архиве, отменить applied
-          — в карточке.
+          Изменения сохранены.
         </Notice>
       )}
       {loading && !result ? (
@@ -404,16 +513,23 @@ export function Jobs({
       ) : result && result.items.length === 0 ? (
         <div className="empty-state">
           <div className="round-icon">
-            <Icon name={tab === "active" ? "jobs" : "archive"} size={28} />
+            <Icon
+              name={tab === "active" ? "jobs" : tab === "applied" ? "applied" : "archive"}
+              size={28}
+            />
           </div>
           <h2>
             {tab === "active"
               ? "Новые возможности впереди"
+              : tab === "applied"
+                ? "Откликов пока нет"
               : "В архиве пока пусто"}
           </h2>
           <p>
             {tab === "active"
               ? "Запустите поиск, чтобы получить актуальные QA-вакансии."
+              : tab === "applied"
+                ? "После подтверждения отклика вакансия появится здесь."
               : "Здесь будут вакансии, для которых вы выбрали «Не подходит»."}
           </p>
           {tab === "active" && (

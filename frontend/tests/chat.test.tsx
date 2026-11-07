@@ -136,3 +136,45 @@ it("avoids duplicate messages while sending", async () => {
   await act(async () => finish(new Response("{}")));
   expect(screen.getByRole("textbox")).toHaveValue("");
 });
+
+it("starts a new document generation directly from the job conversation", async () => {
+  const backend = server();
+  const generated = vi.fn();
+  render(
+    <Chat
+      jobId="job-1"
+      documentKind="cover_letter"
+      revision={0}
+      onGenerated={generated}
+    />,
+  );
+  await screen.findByText("Здесь сохранится ваш диалог.");
+  await userEvent.click(
+    screen.getByRole("button", { name: "Сгенерировать заново" }),
+  );
+  await screen.findByText("Повторная генерация запущена.");
+  expect(generated).toHaveBeenCalledOnce();
+  expect(
+    backend.calls.find((call) => call.path === "/jobs/job-1/documents")?.body,
+  ).toMatchObject({ kind: "cover_letter", language: "auto" });
+});
+
+it("keeps the regenerate action available after an API failure", async () => {
+  const backend = server();
+  backend.failures.push({
+    path: "/jobs/job-1/documents",
+    status: 503,
+    detail: "Очередь временно недоступна",
+  });
+  render(<Chat jobId="job-1" documentKind="cv" revision={0} />);
+  await screen.findByText("Здесь сохранится ваш диалог.");
+  await userEvent.click(
+    screen.getByRole("button", { name: "Сгенерировать заново" }),
+  );
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Очередь временно недоступна",
+  );
+  expect(
+    screen.getByRole("button", { name: "Сгенерировать заново" }),
+  ).toBeEnabled();
+});

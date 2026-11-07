@@ -35,17 +35,31 @@ it("loads ten cards, paginates, persists applied/archive and restores a vacancy"
   await userEvent.click(
     within(card).getByRole("link", { name: /Перейти на страницу вакансии/ }),
   );
-  await within(card).findByText("applied");
-  expect(card).toHaveClass("job-applied");
+  expect(screen.getByRole("dialog", { name: "Ты откликнулся?" })).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "Нет" }));
+  expect(backend.state.jobs[0].applied_at).toBeNull();
+  expect(card).toBeInTheDocument();
+  await userEvent.click(
+    within(card).getByRole("link", { name: /Перейти на страницу вакансии/ }),
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Да" }));
+  await waitFor(() => expect(card).not.toBeInTheDocument());
   expect(backend.state.jobs[0].applied_at).toBeTruthy();
+  await userEvent.click(screen.getByRole("button", { name: "Applied" }));
+  const applied = await screen.findByRole("article", {
+    name: "Senior QA Engineer job-1",
+  });
+  expect(applied).toHaveClass("job-applied");
   await userEvent.click(
-    within(card).getByRole("button", { name: "Отменить applied" }),
+    within(applied).getByRole("button", { name: "Отменить applied" }),
   );
-  await waitFor(() =>
-    expect(within(card).queryByText("applied")).not.toBeInTheDocument(),
-  );
+  await screen.findByText("Откликов пока нет");
+  await userEvent.click(screen.getByRole("button", { name: /Вакансии/ }));
+  const restored = await screen.findByRole("article", {
+    name: "Senior QA Engineer job-1",
+  });
   await userEvent.click(
-    within(card).getByRole("button", { name: "Не подходит" }),
+    within(restored).getByRole("button", { name: "Не подходит" }),
   );
   await waitFor(() =>
     expect(

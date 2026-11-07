@@ -563,6 +563,34 @@ small {
   padding-top: 6px;
   color: #35543c;
 }
+.job-match {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 12px;
+  color: #7a8476;
+  font-size: 10px;
+}
+.job-match strong {
+  color: #526c48;
+  font-size: 12px;
+}
+.job-match ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.job-match li {
+  border: 1px solid #e4e9dd;
+  border-radius: 4px;
+  padding: 3px 6px;
+  background: #f8faf5;
+}
 .tags {
   display: flex;
   flex-wrap: wrap;
@@ -674,6 +702,42 @@ small {
   cursor: wait;
   opacity: 0.6;
 }
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: #18201966;
+}
+.confirmation-modal {
+  width: min(420px, 100%);
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: 0 22px 70px #1820192e;
+}
+.confirmation-modal h2 {
+  margin: 8px 0 10px;
+  font-family: "Manrope", sans-serif;
+  font-size: 24px;
+  letter-spacing: -0.5px;
+}
+.confirmation-modal .muted {
+  font-size: 12px;
+  line-height: 1.7;
+}
+.confirmation-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 24px;
+}
+.confirmation-actions .button {
+  min-width: 90px;
+  justify-content: center;
+}
 .job-footer {
   border-top: 1px solid #eff0e9;
   display: flex;
@@ -706,7 +770,7 @@ small {
 }
 .task-heading {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
 }
@@ -720,6 +784,18 @@ small {
   gap: 6px;
   align-items: center;
 }
+.task-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  text-align: right;
+}
+.task-meta time {
+  color: #969e90;
+  font-size: 8px;
+  white-space: nowrap;
+}
 .task-error {
   font-size: 11px;
   color: #966049;
@@ -730,11 +806,33 @@ small {
   font-size: 10px;
   margin-top: 8px;
 }
+.task-delete-button {
+  color: #9c4f3b;
+}
+.task-delete-confirmation {
+  border-top: 1px solid #e5ddd5;
+  color: #7f665b;
+  margin-top: 9px;
+  padding-top: 8px;
+}
+.task-delete-confirmation > div {
+  display: flex;
+  gap: 14px;
+  margin-top: 3px;
+}
+.task-delete-confirmation .text-button {
+  font-size: 10px;
+}
 .download-row {
   display: flex;
   gap: 14px;
   flex-wrap: wrap;
   margin-top: 10px;
+}
+.artifact-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 .download-link {
   color: var(--accent);
@@ -742,6 +840,43 @@ small {
   display: flex;
   gap: 4px;
   align-items: center;
+}
+.document-preview {
+  max-height: 420px;
+  overflow: auto;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid #e0e6db;
+  border-radius: 6px;
+  background: #fff;
+  overflow-wrap: anywhere;
+}
+.document-preview h4 {
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+.document-preview h5 {
+  margin: 12px 0 5px;
+  font-size: 11px;
+}
+.preview-paragraph {
+  margin: 8px 0;
+  line-height: 1.6;
+}
+.preview-paragraph p {
+  white-space: pre-wrap;
+}
+.preview-paragraph details {
+  margin-top: 4px;
+  color: #74816f;
+  font-size: 10px;
+}
+.preview-paragraph summary {
+  cursor: pointer;
+}
+.preview-paragraph ul {
+  margin: 5px 0 0;
+  padding-left: 18px;
 }
 .download-link:hover {
   text-decoration: underline;
@@ -1154,6 +1289,24 @@ small {
   min-height: 35px;
   padding: 8px 11px;
 }
+.chat-regenerate {
+  border-top: 1px solid #edf0e8;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+}
+.chat-regenerate > span {
+  color: #647b57;
+  font-size: 9px;
+}
+.chat-regenerate .button {
+  font-size: 10px;
+  min-height: 35px;
+  padding: 8px 11px;
+}
 .job-card > .chat-panel {
   margin-bottom: 24px;
 }
@@ -1370,9 +1523,11 @@ small {
   }
   .list-meta {
     font-size: 9px;
+    flex-direction: column;
+    gap: 6px;
   }
   .list-meta > span:last-child {
-    display: none;
+    display: inline;
   }
   .job-card {
     padding: 22px 20px 0;
@@ -1478,11 +1633,20 @@ small {
   .sidebar nav {
     display: flex;
     gap: 4px;
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .sidebar nav::-webkit-scrollbar {
+    display: none;
   }
   .nav-item {
+    flex: 0 0 auto;
+    width: auto;
     font-size: 10px;
     justify-content: center;
-    padding: 11px 9px;
+    gap: 6px;
+    padding: 11px 5px;
     white-space: nowrap;
   }
   .nav-item svg {

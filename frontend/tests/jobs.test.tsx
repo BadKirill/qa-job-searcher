@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { JobCard, Jobs } from "../src/Jobs";
 import { makeJob, makeTask, server } from "./fixtures";
@@ -28,6 +28,8 @@ it("shows sparse vacancies honestly and renders external descriptions as text", 
   };
   const { rerender } = render(<JobCard job={job} {...props} />);
   expect(screen.getByText("Компания не указана")).toBeInTheDocument();
+  expect(screen.getByText("Рейтинг по фильтрам")).toBeInTheDocument();
+  expect(screen.getByText("роль: qa engineer")).toBeInTheDocument();
   expect(screen.getByText("Ссылка недоступна")).toBeInTheDocument();
   expect(
     screen.getByText(/Полное описание пока недоступно/),
@@ -42,6 +44,25 @@ it("shows sparse vacancies honestly and renders external descriptions as text", 
   );
   expect(screen.getByText("<img src=x onerror=steal()>")).toBeInTheDocument();
   expect(document.querySelector("img")).toBeNull();
+});
+
+it("shows stale search snapshots and handles missing freshness metadata", async () => {
+  const backend = server();
+  const props = {
+    tab: "active" as const,
+    tasks: [],
+    hasTemplate: true,
+    onProfile: vi.fn(),
+    onTask: vi.fn(),
+  };
+  const { rerender } = render(<Jobs {...props} revision={0} />);
+  expect(await screen.findByText("Последний поиск:", { exact: false })).toBeInTheDocument();
+  backend.state.lastSearchAt = "2026-10-03T11:00:00Z";
+  rerender(<Jobs {...props} revision={1} />);
+  expect(await screen.findByText(/Просматривается сохранённый снимок/)).toBeInTheDocument();
+  backend.state.lastSearchAt = null;
+  rerender(<Jobs {...props} revision={2} />);
+  expect(await screen.findByText("Поиск ещё не завершался")).toBeInTheDocument();
 });
 
 it("surfaces document failure and deduplicates task snapshots", async () => {
@@ -70,6 +91,69 @@ it("surfaces document failure and deduplicates task snapshots", async () => {
     "Описание неполное",
   );
   expect(onTask).not.toHaveBeenCalled();
+});
+
+it("asks whether the user applied and changes state only after confirmation", async () => {
+  const backend = server();
+  const onState = vi.fn();
+  render(
+    <JobCard
+      job={backend.state.jobs[0]}
+      tasks={[]}
+      hasTemplate
+      onProfile={vi.fn()}
+      onState={onState}
+      onTask={vi.fn()}
+      revision={0}
+    />,
+  );
+  const link = screen.getByRole("link", {
+    name: "Перейти на страницу вакансии",
+  });
+
+  await userEvent.click(link);
+  const dialog = screen.getByRole("dialog", { name: "Ты откликнулся?" });
+  expect(backend.state.jobs[0].applied_at).toBeNull();
+  expect(within(dialog).getByRole("button", { name: "Нет" })).toHaveFocus();
+  await userEvent.click(within(dialog).getByRole("button", { name: "Нет" }));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(onState).not.toHaveBeenCalled();
+
+  await userEvent.click(link);
+  await userEvent.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  await userEvent.click(link);
+  await userEvent.click(screen.getByRole("button", { name: "Да" }));
+  await waitFor(() => expect(onState).toHaveBeenCalledOnce());
+  expect(backend.state.jobs[0].applied_at).toBeTruthy();
+});
+
+it("keeps the application confirmation open when saving fails", async () => {
+  const backend = server();
+  backend.failures.push({
+    path: "/jobs/job-1/state",
+    status: 503,
+    detail: "Статус не сохранён",
+  });
+  render(
+    <JobCard
+      job={backend.state.jobs[0]}
+      tasks={[]}
+      hasTemplate
+      onProfile={vi.fn()}
+      onState={vi.fn()}
+      onTask={vi.fn()}
+      revision={0}
+    />,
+  );
+
+  await userEvent.click(
+    screen.getByRole("link", { name: "Перейти на страницу вакансии" }),
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Да" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Статус не сохранён");
+  expect(screen.getByRole("dialog", { name: "Ты откликнулся?" })).toBeVisible();
+  expect(backend.state.jobs[0].applied_at).toBeNull();
 });
 
 it("cancels a pending document, preserving errors when cancellation fails", async () => {
@@ -104,6 +188,41 @@ it("cancels a pending document, preserving errors when cancellation fails", asyn
   );
   await waitFor(() => expect(onTask).toHaveBeenCalledOnce());
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+it("deletes a finished document after confirmation and surfaces deletion failures", async () => {
+  const backend = server();
+  const onTask = vi.fn();
+  const task = makeTask({ status: "failed" });
+  render(
+    <JobCard
+      job={makeJob("job-1", { documents: [task] })}
+      tasks={[]}
+      hasTemplate
+      onProfile={vi.fn()}
+      onState={vi.fn()}
+      onTask={onTask}
+      revision={0}
+    />,
+  );
+  backend.failures.push({
+    path: "/tasks/task-1",
+    status: 503,
+    detail: "Не удалось удалить файлы",
+  });
+
+  await userEvent.click(screen.getByRole("button", { name: "Удалить" }));
+  await userEvent.click(screen.getByRole("button", { name: "Удалить документ" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось удалить файлы");
+  expect(onTask).not.toHaveBeenCalled();
+
+  await userEvent.click(screen.getByRole("button", { name: "Удалить документ" }));
+  await waitFor(() => expect(onTask).toHaveBeenCalledOnce());
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(backend.calls.at(-1)).toMatchObject({
+    path: "/tasks/task-1",
+    method: "DELETE",
+  });
 });
 
 it("handles a jobs endpoint outage and reloads after explicit retry", async () => {

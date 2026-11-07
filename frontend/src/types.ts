@@ -32,6 +32,18 @@ export type Task = {
   artifacts: Artifact[];
   created_at: string;
   conversation_id?: string;
+  preview_available?: boolean;
+};
+export type DocumentPreview = {
+  draft: {
+    title: string;
+    language: string;
+    sections: {
+      heading: string;
+      paragraphs: { text: string; fact_ids: string[]; kind: string }[];
+    }[];
+  };
+  facts: { id: string; text: string; source: string }[];
 };
 export type Job = {
   id: string;
@@ -42,7 +54,9 @@ export type Job = {
   description: string;
   salary: string | null;
   score: number;
+  match_reasons: string[];
   published_at: string | null;
+  last_seen_at?: string | null;
   details: {
     languages: string[];
     programming_languages: string[];
@@ -60,6 +74,8 @@ export type JobPage = {
   page: number;
   pages: number;
   snapshot_id: string;
+  snapshot_at?: string | null;
+  last_search_at?: string | null;
 };
 export type Message = {
   id: string;
@@ -68,4 +84,4 @@ export type Message = {
   status?: string;
   created_at: string;
 };
-export type View = "active" | "archive" | "profile";
+export type View = "active" | "applied" | "archive" | "profile";

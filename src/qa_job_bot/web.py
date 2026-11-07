@@ -3,6 +3,7 @@ import base64
 import hashlib
 import hmac
 import os
+import shutil
 import time
 from pathlib import Path
 from typing import Annotated, Literal
@@ -14,12 +15,30 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from qa_job_bot.document_files import DocumentFileError, parse_template
+from qa_job_bot.document_policy import content_hash
 from qa_job_bot.web_security import Security, WebSettings
 from qa_job_bot.web_store import StoreError, WebStore, digest, encode
 
 COOKIE = "qa_session"
 MAX_BODY = 11 * 1024 * 1024
 Text = Annotated[str, Field(min_length=1, max_length=120, strict=True)]
+
+
+def stage_task_directory(settings: WebSettings, task_id: str) -> tuple[Path, Path] | None:
+    root = (settings.data_dir / "artifacts").resolve()
+    source = root / task_id
+    if source.is_symlink():
+        raise StoreError("Каталог документа небезопасен для удаления.", 409)
+    resolved = source.resolve()
+    if resolved.parent != root:
+        raise StoreError("Каталог документа небезопасен для удаления.", 409)
+    if not resolved.exists():
+        return None
+    if not resolved.is_dir():
+        raise StoreError("Каталог документа повреждён.", 409)
+    staged = root / f".deleting-{task_id}-{uuid4()}"
+    resolved.rename(staged)
+    return resolved, staged
 
 
 class Input(BaseModel):
@@ -251,9 +270,51 @@ def create_app(settings: WebSettings | None = None, store: WebStore | None = Non
     def cancel(task_id: str):
         return store.cancel_task(task_id)
 
+    @app.delete("/api/tasks/{task_id}", status_code=204)
+    def delete_task(task_id: str):
+        store.document_task_for_deletion(task_id)
+        staged = stage_task_directory(settings, task_id)
+        if staged:
+            try:
+                shutil.rmtree(staged[1])
+            except OSError as error:
+                if staged[1].exists():
+                    staged[1].rename(staged[0])
+                raise StoreError("Не удалось удалить файлы документа.", 500) from error
+        store.delete_document_task(task_id)
+        return Response(status_code=204)
+
     @app.get("/api/tasks/{task_id}/review")
     def review(task_id: str):
         return store.task(task_id)["result"]
+
+    @app.get("/api/tasks/{task_id}/document-preview")
+    def document_preview(task_id: str):
+        task = store.task(task_id, internal=True)
+        result = task["result"]
+        draft = result.get("approved_draft")
+        if task["status"] != "ready" or not result.get("verified") or not isinstance(draft, dict):
+            raise StoreError("Проверенный черновик недоступен.", 404)
+        if content_hash(draft) != result.get("draft_hash"):
+            raise StoreError("Проверка целостности черновика не пройдена.", 409)
+        try:
+            used_ids = {
+                fact_id
+                for section in draft["sections"]
+                for paragraph in section["paragraphs"]
+                for fact_id in paragraph["fact_ids"]
+            }
+            pinned = task["payload"]["context"]["template"]["facts"]
+            facts = [
+                {key: fact[key] for key in ("id", "text", "source") if key in fact}
+                for fact in pinned
+                if fact["id"] in used_ids
+            ]
+            if {fact["id"] for fact in facts} != used_ids:
+                raise StoreError("Подтверждённые факты документа недоступны.", 409)
+        except (KeyError, TypeError) as error:
+            raise StoreError("Подтверждённые факты документа недоступны.", 409) from error
+        return {"draft": draft, "facts": facts}
 
     @app.get("/api/profile")
     def profile():
@@ -400,7 +461,12 @@ def create_app(settings: WebSettings | None = None, store: WebStore | None = Non
         template = store.profile()["active"]
         if template is None:
             raise StoreError("Сначала задайте и подтвердите эталонный шаблон.", 409)
-        context = {"job": job, "template": template, "owner_messages": store.owner_messages(job_id)}
+        context = {
+            "job": job,
+            "template": template,
+            "owner_messages": store.owner_messages(job_id),
+            "conversation_messages": store.document_conversation(job_id),
+        }
         return store.enqueue(
             data.kind,
             f"{data.kind}:{job_id}:{digest(context)}",
@@ -409,8 +475,7 @@ def create_app(settings: WebSettings | None = None, store: WebStore | None = Non
             request=request,
         )
 
-    @app.get("/api/artifacts/{artifact_id}/download")
-    def download(artifact_id: str):
+    def verified_artifact(artifact_id: str) -> tuple[dict, Path]:
         artifact = store.artifact(artifact_id)
         path = Path(artifact["path"]).resolve()
         task = store.task(artifact["task_id"])
@@ -425,12 +490,29 @@ def create_app(settings: WebSettings | None = None, store: WebStore | None = Non
             )
         ):
             raise StoreError("Проверка целостности документа не пройдена.", 409)
+        return artifact, path
+
+    @app.get("/api/artifacts/{artifact_id}/download")
+    def download(artifact_id: str):
+        artifact, path = verified_artifact(artifact_id)
         return FileResponse(
             path,
             filename=artifact["filename"],
             media_type="application/pdf"
             if artifact["format"] == "pdf"
             else "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+    @app.get("/api/artifacts/{artifact_id}/preview")
+    def preview_artifact(artifact_id: str):
+        artifact, path = verified_artifact(artifact_id)
+        if artifact["format"] != "pdf":
+            raise StoreError("Просмотр доступен только для PDF.", 422)
+        return FileResponse(
+            path,
+            filename=artifact["filename"],
+            media_type="application/pdf",
+            content_disposition_type="inline",
         )
 
     @app.get("/api/events")

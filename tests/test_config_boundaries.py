@@ -80,6 +80,14 @@ def test_environment_limits_and_user_ids(monkeypatch: pytest.MonkeyPatch) -> Non
     assert settings.database_path == Path("/tmp/test.sqlite3")
 
 
+def test_bot_requires_nonempty_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "")
+    with pytest.raises(ValueError, match="at least one user ID"):
+        Settings.from_env()
+    assert Settings.from_env(require_token=False).allowed_user_ids == frozenset()
+
+
 @pytest.mark.parametrize("value", ["alice", "1,2,no", "1.2"])
 def test_invalid_user_ids_are_rejected(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
     monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", value)
@@ -103,6 +111,7 @@ def test_profile_normalizes_terms_and_preserves_explicit_flags(tmp_path: Path) -
     )
     profile = load_profile(path)
     assert profile.role_keywords == ("qa", "тест")
+    assert profile.focus_qa_keywords
     assert not profile.require_remote
     assert profile.allow_unknown_remote_location
     assert profile.min_score == 99

@@ -29,6 +29,20 @@ DEFAULT_ROLE_KEYWORDS = (
     "sdet",
 )
 
+DEFAULT_FOCUS_QA_KEYWORDS = (
+    "manual qa",
+    "manual quality assurance",
+    "manual tester",
+    "manual testing",
+    "ручное тестирование",
+    "fullstack qa",
+    "full-stack qa",
+    "full stack qa",
+    "fullstack quality assurance",
+    "full-stack quality assurance",
+    "full stack quality assurance",
+)
+
 EUROPE_CIS_LOCATION_TERMS = (
     "albania",
     "andorra",
@@ -112,13 +126,8 @@ class SearchProfile:
         "mid level",
         "medior",
         "senior",
-        "lead",
-        "head",
-        "manager",
-        "principal",
-        "staff",
-        "architect",
     )
+    focus_qa_keywords: tuple[str, ...] = DEFAULT_FOCUS_QA_KEYWORDS
     domain_keywords: tuple[str, ...] = (
         "fintech",
         "digital asset",
@@ -132,14 +141,15 @@ class SearchProfile:
         "saas",
     )
     skill_keywords: tuple[str, ...] = (
-        "playwright",
-        "selenium",
-        "cypress",
-        "python",
-        "typescript",
+        "manual testing",
+        "functional testing",
+        "regression testing",
+        "exploratory testing",
         "api testing",
-        "test automation",
-        "ci/cd",
+        "web testing",
+        "mobile testing",
+        "database testing",
+        "sql",
     )
     allowed_locations: tuple[str, ...] = (
         "worldwide",
@@ -219,6 +229,8 @@ class Settings:
             allowed = frozenset(int(value.strip()) for value in raw_ids.split(",") if value.strip())
         except ValueError as exc:
             raise ValueError("TELEGRAM_ALLOWED_USER_IDS must contain numeric IDs") from exc
+        if require_token and not allowed:
+            raise ValueError("TELEGRAM_ALLOWED_USER_IDS must contain at least one user ID")
         return cls(
             telegram_bot_token=token,
             allowed_user_ids=allowed,
@@ -258,6 +270,7 @@ def load_profile(path: Path) -> SearchProfile:
             raw, "excluded_title_keywords", defaults.excluded_title_keywords
         ),
         preferred_seniority=_tuple(raw, "preferred_seniority", defaults.preferred_seniority),
+        focus_qa_keywords=_tuple(raw, "focus_qa_keywords", defaults.focus_qa_keywords),
         domain_keywords=_tuple(raw, "domain_keywords", defaults.domain_keywords),
         skill_keywords=_tuple(raw, "skill_keywords", defaults.skill_keywords),
         allowed_locations=_tuple(raw, "allowed_locations", defaults.allowed_locations),

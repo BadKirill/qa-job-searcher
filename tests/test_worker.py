@@ -12,9 +12,14 @@ from docx import Document
 from pypdf import PdfReader
 
 from qa_job_bot import worker as worker_module
-from qa_job_bot.agent_gateway import AgentUnavailable
+from qa_job_bot.agent_gateway import AgentGateway, AgentUnavailable
 from qa_job_bot.document_files import DocumentFileError, parse_template
-from qa_job_bot.document_policy import PolicyViolation, canonical_text, content_hash
+from qa_job_bot.document_policy import (
+    PolicyViolation,
+    canonical_text,
+    content_hash,
+    template_visual_reference,
+)
 from qa_job_bot.models import FetchReport, Job
 from qa_job_bot.web_security import WebSettings
 from qa_job_bot.web_store import StoreError, WebStore
@@ -68,6 +73,7 @@ def worker(tmp_path: Path) -> Worker:
     gateway = SimpleNamespace(
         generate=AsyncMock(side_effect=generate),
         review=AsyncMock(side_effect=lambda context, draft: review_result(draft)),
+        visual_review=AsyncMock(side_effect=visual_result),
         chat=AsyncMock(return_value="Подтвердите изменения в профиле."),
     )
     search = SimpleNamespace(refresh=AsyncMock(return_value=FetchReport([], [])))
@@ -119,7 +125,7 @@ def visual_result(context, draft, rendered):
         "verdict": "pass",
         "issues": [],
         "draft_hash": content_hash(draft),
-        "template_sha256": context["template"]["reference"]["sha256"],
+        "template_sha256": template_visual_reference(context["template"])["sha256"],
         "rendered_sha256": rendered["sha256"],
     }
 
@@ -150,6 +156,26 @@ async def test_pdf_files_require_visual_review_of_actual_rendered_pages(worker):
     assert result["result"]["visual_reviewer"] == {"thread_id": "visual-session"}
     pdf = next(worker.store.artifact(a["id"]) for a in result["artifacts"] if a["format"] == "pdf")
     assert result["result"]["visual_review"]["rendered_sha256"] == pdf["sha256"]
+
+
+async def test_docx_source_requires_visual_pass_before_download(worker):
+    task = enqueue_document(worker)
+
+    async def visual(context, draft, rendered):
+        assert rendered["pages"][0]["image_base64"]
+        assert len(template_visual_reference(context["template"])["sha256"]) == 64
+        result = visual_result(context, draft, rendered)
+        result.update(verdict="revise", issues=["Clipped content"])
+        return result
+
+    worker.gateway.visual_review = AsyncMock(side_effect=visual)
+    await worker.once()
+    result = worker.store.task(task["id"])
+    assert result["status"] == "blocked"
+    assert result["artifacts"] == []
+    worker.gateway.visual_review.assert_awaited()
+    with worker.store._connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM web_artifacts").fetchone()[0] == 0
 
 
 @pytest.mark.parametrize(
@@ -327,6 +353,11 @@ async def test_verified_documents_render_real_pdf_docx_and_bind_hashes(
     assert worker.gateway.generate.await_args.args[0]["language"] == language
     assert finished["result"]["verified"] is True
     assert finished["result"]["draft_hash"] == content_hash(sample_draft(language))
+    assert finished["preview_available"] is True
+    assert "approved_draft" not in finished["result"]
+    assert worker.store.task(task["id"], internal=True)["result"]["approved_draft"] == (
+        sample_draft(language)
+    )
     assert finished["result"]["template_version"] == "version-1"
     assert {artifact["format"] for artifact in finished["artifacts"]} == {"pdf", "docx"}
     for summary in finished["artifacts"]:
@@ -375,9 +406,105 @@ async def test_revision_feedback_is_passed_and_success_is_fully_rechecked(worker
     ]
     assert await worker.once()
     assert "revision_feedback" not in contexts[0]
+    assert "revision_draft" not in contexts[0]
     assert contexts[1]["revision_feedback"] == ["Confirm the experience"]
+    assert contexts[1]["revision_draft"] == sample_draft()
     assert worker.store.task(task["id"])["status"] == "ready"
     assert worker.gateway.review.await_count == 2
+
+
+async def test_local_draft_rejection_is_regenerated_before_review(worker: Worker) -> None:
+    task = enqueue_document(worker)
+    invalid = sample_draft()
+    invalid["sections"][0]["paragraphs"][0]["text"] = "I have 99 years of experience."
+    contexts = []
+
+    async def generate(context):
+        contexts.append(deepcopy(context))
+        return invalid if len(contexts) == 1 else sample_draft()
+
+    worker.gateway.generate.side_effect = generate
+    assert await worker.once()
+    assert worker.store.task(task["id"])["status"] == "ready"
+    assert worker.gateway.generate.await_count == 2
+    assert worker.gateway.review.await_count == 1
+    assert contexts[1]["revision_feedback"] == ["Document contains unsupported numbers or dates"]
+
+
+async def test_unconfirmed_employer_never_reaches_reviewer_or_download(worker: Worker) -> None:
+    task = enqueue_document(worker)
+    invented = sample_draft()
+    invented["sections"][0]["paragraphs"][0]["text"] = (
+        "I test software applications and APIs at Globex."
+    )
+    worker.gateway.generate.return_value = invented
+    worker.gateway.generate.side_effect = None
+    await worker.once()
+    result = worker.store.task(task["id"])
+    assert result["status"] == "blocked"
+    assert result["artifacts"] == []
+    assert worker.gateway.generate.await_count == 3
+    worker.gateway.review.assert_not_awaited()
+    worker.gateway.visual_review.assert_not_awaited()
+
+
+async def test_visual_rejection_regenerates_and_rechecks_every_stage(worker: Worker) -> None:
+    task = enqueue_pdf(worker)
+    visual_calls = 0
+
+    async def visual(context, draft, rendered):
+        nonlocal visual_calls
+        visual_calls += 1
+        result = visual_result(context, draft, rendered)
+        if visual_calls == 1:
+            result.update(verdict="revise", issues=["Increase spacing"])
+        return result
+
+    worker.gateway.visual_review = AsyncMock(side_effect=visual)
+    assert await worker.once()
+    assert worker.store.task(task["id"])["status"] == "ready"
+    assert worker.gateway.generate.await_count == 2
+    assert worker.gateway.review.await_count == 2
+    assert worker.gateway.visual_review.await_count == 2
+    second_context = worker.gateway.generate.await_args_list[1].args[0]
+    assert "Increase spacing" in second_context["revision_feedback"][0]
+
+
+@pytest.mark.parametrize(
+    "dimension", ["vacancy_alignment", "evidence_selection", "document_structure"]
+)
+async def test_real_gateway_quality_gate_blocks_artifacts_after_bounded_revisions(
+    worker, dimension
+):
+    task = enqueue_document(worker)
+    gateway = AgentGateway()
+    seen_feedback = []
+
+    async def response(context, role, instructions, schema, extra=None, draft=None):
+        if role == "generator":
+            seen_feedback.append(list(context.get("revision_feedback", [])))
+            return sample_draft()
+        review = review_result(draft)
+        review["assessment"] = {
+            name: {
+                "passed": name != dimension,
+                "issues": ["Highlight confirmed API work"] if name == dimension else [],
+            }
+            for name in ("vacancy_alignment", "evidence_selection", "document_structure")
+        }
+        return review
+
+    gateway._run = AsyncMock(side_effect=response)
+    worker.gateway = gateway
+    await worker.once()
+    result = worker.store.task(task["id"])
+    assert result["status"] == "blocked"
+    assert dimension in result["error"]
+    assert result["artifacts"] == []
+    assert len(seen_feedback) == 3
+    assert seen_feedback[0] == []
+    assert all("Highlight confirmed API work" in feedback[0] for feedback in seen_feedback[1:])
+    assert not (worker.settings.data_dir / "artifacts" / task["id"]).exists()
 
 
 @pytest.mark.parametrize("stage", ["generate", "review"])
@@ -460,8 +587,8 @@ async def test_cancellation_while_rendering_prevents_download(worker: Worker, mo
     task = enqueue_document(worker)
     original = worker_module.render_documents
 
-    def render(draft, template, directory):
-        files = original(draft, template, directory)
+    def render(draft, template, directory, document_kind):
+        files = original(draft, template, directory, document_kind)
         worker.store.cancel_task(task["id"])
         return files
 

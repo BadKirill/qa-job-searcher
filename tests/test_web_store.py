@@ -63,7 +63,7 @@ def test_initialize_and_settings_preserve_values_after_restart(store: WebStore) 
     with restarted._connect() as db:
         assert [
             row[0] for row in db.execute("SELECT version FROM schema_migrations ORDER BY version")
-        ] == [1, 2]
+        ] == [1, 2, 3]
 
 
 @pytest.mark.parametrize("count", [0, 1, 9, 10, 11, 20, 21])
@@ -124,9 +124,11 @@ def test_snapshot_stays_stable_during_new_search_and_archive_preserves_state(
     restored = store.change_state(last_id, {"archived": False})
     assert restored["archived_at"] is None
     assert restored["applied_at"] == marked["applied_at"]
-    assert last_id in {item["id"] for item in store.list_jobs("active", 1)["items"]}
+    assert last_id in {item["id"] for item in store.list_jobs("applied", 1)["items"]}
+    assert last_id not in {item["id"] for item in store.list_jobs("active", 1)["items"]}
     cleared = store.change_state(last_id, {"applied": False})
     assert cleared["applied_at"] is None
+    assert last_id in {item["id"] for item in store.list_jobs("active", 1)["items"]}
     store.upsert_jobs([replace(jobs[-1], description="Changed description")])
     assert store.get_job(last_id)["applied_at"] is None
 
@@ -370,6 +372,54 @@ def test_cancellation_blocks_late_completion_and_preserves_terminal_state(
     assert store.claim("worker") is None
 
 
+def test_document_deletion_scrubs_content_and_preserves_only_tombstone(store: WebStore) -> None:
+    task = store.enqueue("cv", "scope", {"job_id": "job", "secret": "text"}, "request")
+    store.claim("worker")
+    artifact = store.add_artifact(
+        task["id"],
+        {"filename": "cv.pdf", "format": "pdf", "path": "/private/cv.pdf", "sha256": "x"},
+    )
+    assert store.finish_task(task["id"], "worker", "failed", error="broken")
+
+    assert store.document_task_for_deletion(task["id"])["error"] == "broken"
+    store.delete_document_task(task["id"])
+
+    with pytest.raises(StoreError) as error:
+        store.task(task["id"])
+    assert_status(error, 404)
+    with pytest.raises(StoreError) as error:
+        store.artifact(artifact["id"])
+    assert_status(error, 404)
+    assert store.tasks() == []
+    assert store.request_task("request", {"kind": "cv", "scope": "scope", "payload": {}}) is None
+    tombstone = store.task(task["id"], internal=True)
+    assert tombstone["status"] == "deleted"
+    assert tombstone["payload"] == {}
+    assert tombstone["result"] == {}
+    assert tombstone["error"] is None
+    assert tombstone["artifacts"] == []
+    replacement = store.enqueue("cv", "scope", {}, "request")
+    assert replacement["id"] != task["id"]
+    with pytest.raises(StoreError) as error:
+        store.delete_document_task(task["id"])
+    assert_status(error, 404)
+
+
+def test_document_deletion_rejects_active_non_document_and_missing_tasks(store: WebStore) -> None:
+    active = store.enqueue("cover_letter", "letter", {}, "letter-request")
+    with pytest.raises(StoreError) as error:
+        store.delete_document_task(active["id"])
+    assert_status(error, 409)
+    search = store.enqueue("search", "search", {}, "search-request")
+    store.cancel_task(search["id"])
+    with pytest.raises(StoreError) as error:
+        store.delete_document_task(search["id"])
+    assert_status(error, 422)
+    with pytest.raises(StoreError) as error:
+        store.document_task_for_deletion("missing")
+    assert_status(error, 404)
+
+
 @pytest.mark.parametrize(
     "status,verified", [("blocked", False), ("failed", False), ("ready", False), ("ready", True)]
 )
@@ -535,6 +585,28 @@ def test_old_job_documents_remain_after_many_other_tasks(store: WebStore) -> Non
     assert [task["id"] for task in store.get_job(job.fingerprint)["documents"]] == [document["id"]]
 
 
+def test_colliding_listing_keeps_existing_decisions_and_documents(store: WebStore) -> None:
+    original = make_job(1, "Board A")
+    store.upsert_jobs([original])
+    marked = store.change_state(original.fingerprint, {"applied": True, "archived": True})
+    document = store.enqueue(
+        "cv", f"cv:{original.fingerprint}", {"job_id": original.fingerprint}, "original-cv"
+    )
+    other = replace(original, source="Board B", source_id="new", url="https://jobs.example/new")
+    store.upsert_jobs([other])
+    restarted = WebStore(store.path)
+    restarted.initialize()
+    assert other.fingerprint != original.fingerprint
+    assert restarted.get_job(original.fingerprint)["applied_at"] == marked["applied_at"]
+    assert restarted.get_job(original.fingerprint)["archived_at"] == marked["archived_at"]
+    assert [item["id"] for item in restarted.get_job(original.fingerprint)["documents"]] == [
+        document["id"]
+    ]
+    assert restarted.get_job(other.fingerprint)["applied_at"] is None
+    assert restarted.get_job(other.fingerprint)["archived_at"] is None
+    assert restarted.get_job(other.fingerprint)["documents"] == []
+
+
 def test_owner_messages_are_scoped_recent_and_exclude_assistant_text(store: WebStore) -> None:
     jobs = add_jobs(store, 2)
     assert store.owner_messages(jobs[0].fingerprint) == []
@@ -548,3 +620,8 @@ def test_owner_messages_are_scoped_recent_and_exclude_assistant_text(store: WebS
         f"Preference {index}" for index in range(2, 10)
     ]
     assert store.owner_messages(jobs[1].fingerprint) == ["Other job preference"]
+    transcript = store.document_conversation(jobs[0].fingerprint)
+    assert len(transcript) == 16
+    assert transcript[0] == {"role": "user", "text": "Preference 2"}
+    assert transcript[-1] == {"role": "assistant", "text": "Reply 9"}
+    assert store.document_conversation("missing") == []

@@ -155,6 +155,17 @@ def test_pdf_limits_are_checked_before_render(monkeypatch):
         pdf.render_reference(content, [(595, 842)])
 
 
+@pytest.mark.parametrize("page_size", [(595.2756, 841.8898), (595.28, 841.89), (612, 792)])
+def test_fractional_page_dimensions_remain_within_gateway_image_limit(page_size):
+    from qa_job_bot.agent_gateway import reference_images
+
+    content = synthetic_pdf(pages=1, page_size=page_size)
+    reference = pdf.render_reference(content, [page_size])
+    manifest, images = reference_images(reference)
+    assert len(images) == 1
+    assert max(manifest["pages"][0][axis] for axis in ("width", "height")) <= 1400
+
+
 def text_line(text="A paragraph", **changes):
     return pdf.TextLine(
         **{
@@ -381,7 +392,10 @@ def test_sparse_template_preserves_actual_baselines_and_block_gaps(tmp_path):
         actual = pdf._page_lines(rendered.pages[0])
     assert [line.text for line in actual] == [line.text for line in expected]
     assert [line.baseline for line in actual] == pytest.approx([line.baseline for line in expected])
-    assert [line.x0 for line in actual] == pytest.approx([line.x0 for line in expected])
+    style = template["style"]
+    center = (style["page_width"] + style["margin_left"] - style["margin_right"]) / 2
+    assert [(line.x0 + line.x1) / 2 for line in actual[:2]] == pytest.approx([center] * 2)
+    assert [line.x0 for line in actual[2:]] == pytest.approx([line.x0 for line in expected[2:]])
     assert [line.top for line in actual] == pytest.approx([line.top for line in expected])
     assert template["style"]["margin_top"] == 38
     assert template["style"]["typography"]["heading"]["space_before"] == 27.25

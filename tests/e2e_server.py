@@ -10,7 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import uvicorn
 
 from qa_job_bot.agent_gateway import AgentUnavailable
-from qa_job_bot.document_policy import content_hash
+from qa_job_bot.document_assessment import assess_review
+from qa_job_bot.document_policy import content_hash, template_visual_reference
 from qa_job_bot.models import FetchReport, Job
 from qa_job_bot.web import create_app
 from qa_job_bot.web_security import WebSettings
@@ -24,7 +25,7 @@ class FixtureGateway:
             await asyncio.sleep(2)
         if "Unavailable" in context["job"].get("title", ""):
             raise AgentUnavailable("Fixture provider unavailable")
-        return {
+        draft = {
             "title": "Curriculum Vitae" if context["kind"] == "cv" else "Application",
             "language": context["language"],
             "sections": [
@@ -37,19 +38,42 @@ class FixtureGateway:
                 }
             ],
         }
+        if (
+            context["kind"] == "cv"
+            and context["template"].get("reference")
+            and context["job"].get("title") == "Senior QA Engineer 05"
+        ):
+            header = [
+                {"text": fact["text"], "fact_ids": [fact["id"]], "kind": "body"}
+                for fact in context["template"]["facts"]
+                if fact.get("kind") in {"contact", "role"}
+            ]
+            draft["sections"].insert(0, {"heading": "", "paragraphs": header})
+        return draft
 
     async def review(self, context, draft):
         blocked = "Blocked" in context["job"].get("title", "")
-        return {
+        response = {
             "verdict": "revise" if blocked else "pass",
             "issues": ["Неподтверждённый опыт"] if blocked else [],
             "draft_hash": content_hash(draft),
             "checked_fact_ids": [fact["id"] for fact in context["template"]["facts"]],
         }
+        poorly_tailored = context["job"].get("title") == "Senior QA Engineer 07"
+        response["assessment"] = {
+            name: {
+                "passed": not poorly_tailored or name != "vacancy_alignment",
+                "issues": ["CV не адаптирован к вакансии"]
+                if poorly_tailored and name == "vacancy_alignment"
+                else [],
+            }
+            for name in ("vacancy_alignment", "evidence_selection", "document_structure")
+        }
+        return assess_review(response)[0]
 
     async def visual_review(self, context, draft, rendered_reference):
-        reference = context["template"]["reference"]
-        for visual in [reference, rendered_reference]:
+        reference = context["template"].get("reference")
+        for visual in [item for item in (reference, rendered_reference) if item]:
             assert visual["pages"]
             assert all(
                 base64.b64decode(page["image_base64"]).startswith(b"\x89PNG\r\n\x1a\n")
@@ -59,7 +83,7 @@ class FixtureGateway:
         return {
             "verdict": "revise" if blocked else "pass",
             "issues": ["Неверные отступы в сформированном CV"] if blocked else [],
-            "template_sha256": reference["sha256"],
+            "template_sha256": template_visual_reference(context["template"])["sha256"],
             "rendered_sha256": rendered_reference["sha256"],
             "draft_hash": content_hash(draft),
         }
@@ -97,6 +121,7 @@ def seed_jobs(store):
             "Requirements:\nEnglish B2. Manual testing and automation experience.\n"
             "We are looking for a quality engineer to improve our software products.",
             salary="€4,000–6,000 / month" if index % 2 else "",
+            match_reasons=["QA role", "Remote Europe"],
         )
         for index in range(1, 22)
     ]

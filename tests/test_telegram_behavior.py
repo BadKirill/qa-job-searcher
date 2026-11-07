@@ -181,13 +181,13 @@ async def test_command_routing_handles_case_mentions_and_arguments(bot, command,
     bot.api.send.assert_awaited_once_with(123, expected)
 
 
-async def test_empty_allowlist_allows_user_and_whoami(bot) -> None:
+async def test_empty_allowlist_denies_user(bot) -> None:
     from dataclasses import replace
 
     bot.settings = replace(bot.settings, allowed_user_ids=frozenset())
-    assert bot._authorized(999)
+    assert not bot._authorized(999)
     await bot._handle_update(message("/whoami", user_id=999))
-    bot.api.send.assert_awaited_once_with(123, "Твой Telegram user ID: <code>123</code>")
+    bot.api.send.assert_awaited_once_with(123, "Этот бот приватный.")
 
 
 async def test_settings_and_stats_empty_and_populated(bot) -> None:

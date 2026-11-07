@@ -4,6 +4,7 @@ import json
 import math
 import sqlite3
 import time
+from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any
 from uuid import uuid4
@@ -89,6 +90,7 @@ class WebStore(JobRepository):
                         (row["request_id"], row["id"], encode(request)),
                     )
                 db.execute("INSERT INTO schema_migrations VALUES (2,CURRENT_TIMESTAMP)")
+            db.execute("INSERT OR IGNORE INTO schema_migrations VALUES (3,CURRENT_TIMESTAMP)")
 
     @staticmethod
     def _touch(db: sqlite3.Connection) -> None:
@@ -137,6 +139,7 @@ class WebStore(JobRepository):
         return {
             **job,
             "id": job_id,
+            "last_seen_at": row["last_seen_at"],
             "applied_at": row["applied_at"],
             "archived_at": row["archived_at"],
             "details": extract_details(job.get("description", ""), job["title"]),
@@ -144,7 +147,7 @@ class WebStore(JobRepository):
         }
 
     def list_jobs(self, tab: str, page: int, snapshot_id: str | None = None) -> dict:
-        if tab not in ("active", "archive") or page < 1:
+        if tab not in ("active", "applied", "archive") or page < 1:
             raise StoreError("Некорректная страница.", 422)
         with self._connect() as db:
             if snapshot_id:
@@ -154,6 +157,7 @@ class WebStore(JobRepository):
                 if not snapshot:
                     raise StoreError("Выдача устарела. Обновите страницу.", 409)
                 ids = json.loads(snapshot["job_ids"])
+                snapshot_created_at = snapshot["created_at"]
             else:
                 rows = db.execute("""SELECT fingerprint FROM jobs WHERE payload IS NOT NULL
                     ORDER BY score DESC,published_at DESC,fingerprint""").fetchall()
@@ -163,16 +167,26 @@ class WebStore(JobRepository):
                 retained = {row[0] for row in db.execute("SELECT job_id FROM web_state")}
                 ids = [row[0] for row in rows if row[0] in allowed | retained]
                 snapshot_id = str(uuid4())
+                snapshot_created_at = time.time()
                 db.execute(
                     "INSERT INTO web_snapshots VALUES (?,?,?)",
-                    (snapshot_id, encode(ids), time.time()),
+                    (snapshot_id, encode(ids), snapshot_created_at),
                 )
                 db.execute("DELETE FROM web_snapshots WHERE created_at<?", (time.time() - 86400,))
             states = {
-                row["job_id"]: row["archived_at"]
-                for row in db.execute("SELECT job_id,archived_at FROM web_state")
+                row["job_id"]: (row["applied_at"], row["archived_at"])
+                for row in db.execute("SELECT job_id,applied_at,archived_at FROM web_state")
             }
-        selected = [key for key in ids if bool(states.get(key)) == (tab == "archive")]
+
+        def belongs(key: str) -> bool:
+            applied_at, archived_at = states.get(key, (None, None))
+            if tab == "archive":
+                return bool(archived_at)
+            if tab == "applied":
+                return bool(applied_at) and not archived_at
+            return not applied_at and not archived_at
+
+        selected = [key for key in ids if belongs(key)]
         total = len(selected)
         pages = max(1, math.ceil(total / 10))
         page = min(page, pages)
@@ -182,6 +196,8 @@ class WebStore(JobRepository):
             "page": page,
             "pages": pages,
             "snapshot_id": snapshot_id,
+            "snapshot_at": datetime.fromtimestamp(snapshot_created_at, UTC).isoformat(),
+            "last_search_at": self.get_setting("last_search_at"),
         }
 
     def change_state(self, job_id: str, values: dict[str, bool]) -> dict:
@@ -330,6 +346,16 @@ class WebStore(JobRepository):
                 (f"job:{job_id}",),
             ).fetchall()
         return [row[0] for row in reversed(rows)]
+
+    def document_conversation(self, job_id: str) -> list[dict[str, str]]:
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT m.role,m.text FROM web_messages m
+                JOIN web_conversations c ON c.id=m.conversation_id
+                WHERE c.scope=? ORDER BY m.rowid DESC LIMIT 16""",
+                (f"job:{job_id}",),
+            ).fetchall()
+        return [dict(row) for row in reversed(rows)]
 
     def add_message(self, conversation_id: str, role: str, text: str, request_id: str) -> dict:
         self.get_conversation(conversation_id)
@@ -485,8 +511,17 @@ class WebStore(JobRepository):
         if not row:
             raise StoreError("Задание не найдено.", 404)
         data = dict(row)
+        if data["status"] == "deleted" and not internal:
+            raise StoreError("Задание не найдено.", 404)
         payload = json.loads(data.pop("payload"))
         data["result"] = json.loads(data["result"])
+        data["preview_available"] = bool(
+            data["status"] == "ready"
+            and data["result"].get("verified")
+            and isinstance(data["result"].get("approved_draft"), dict)
+        )
+        if not internal:
+            data["result"].pop("approved_draft", None)
         data.update(
             job_id=payload.get("job_id"),
             conversation_id=payload.get("conversation_id"),
@@ -499,10 +534,14 @@ class WebStore(JobRepository):
     def tasks(self, job_id: str | None = None) -> list[dict]:
         with self._connect() as db:
             if job_id is None:
-                rows = db.execute("SELECT id FROM web_tasks ORDER BY created_at DESC LIMIT 200")
+                rows = db.execute(
+                    """SELECT id FROM web_tasks WHERE status!='deleted'
+                    ORDER BY created_at DESC LIMIT 200"""
+                )
             else:
                 rows = db.execute(
-                    """SELECT id FROM web_tasks WHERE json_extract(payload,'$.job_id')=?
+                    """SELECT id FROM web_tasks WHERE status!='deleted'
+                    AND json_extract(payload,'$.job_id')=?
                     ORDER BY created_at DESC""",
                     (job_id,),
                 )
@@ -562,6 +601,33 @@ class WebStore(JobRepository):
             )
             self._touch(db)
         return self.task(task_id)
+
+    def document_task_for_deletion(self, task_id: str) -> dict:
+        task = self.task(task_id, internal=True)
+        if task["status"] == "deleted":
+            raise StoreError("Задание не найдено.", 404)
+        if task["kind"] not in {"cv", "cover_letter"}:
+            raise StoreError("Удалять можно только CV и cover letter.", 422)
+        if task["status"] in ACTIVE_STATUSES:
+            raise StoreError("Сначала отмените создание документа.", 409)
+        return task
+
+    def delete_document_task(self, task_id: str) -> None:
+        self.document_task_for_deletion(task_id)
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("DELETE FROM web_artifacts WHERE task_id=?", (task_id,))
+            db.execute("DELETE FROM web_task_requests WHERE task_id=?", (task_id,))
+            changed = db.execute(
+                """UPDATE web_tasks SET status='deleted',request_id=?,payload='{}',
+                result='{}',error=NULL,lease_until=NULL,worker_id=NULL WHERE id=?
+                AND kind IN ('cv','cover_letter')
+                AND status NOT IN ('queued','running','verifying','rendering','deleted')""",
+                (f"deleted:{task_id}", task_id),
+            )
+            if not changed.rowcount:
+                raise StoreError("Документ нельзя удалить в текущем состоянии.", 409)
+            self._touch(db)
 
     def add_artifact(self, task_id: str, data: dict) -> dict:
         artifact = {**data, "id": str(uuid4()), "task_id": task_id}

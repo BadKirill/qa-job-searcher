@@ -55,6 +55,18 @@ def content_hash(value: dict) -> str:
     ).hexdigest()
 
 
+def template_visual_reference(template: dict) -> dict:
+    reference = template.get("reference")
+    if reference:
+        return reference
+    digest = template.get("source_sha256") or content_hash(
+        {"facts": template.get("facts", []), "style": template.get("style", {})}
+    )
+    if not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest):
+        raise PolicyViolation("Template visual identity is invalid")
+    return {"sha256": digest}
+
+
 def canonical_text(draft: dict) -> str:
     parts = [draft["title"]]
     for section in draft["sections"]:
@@ -69,6 +81,30 @@ def _safe_text(text: str) -> None:
         raise PolicyViolation("Empty text or forbidden control characters")
     if re.search(r"[\u200b-\u200f\u202a-\u202e\u2066-\u2069]", text):
         raise PolicyViolation("Hidden or directional control characters")
+
+
+def _protected_entity_words(text: str) -> set[str]:
+    ordinary = {"At", "By", "For", "From", "In", "Of", "On", "The", "To", "With"}
+    return {
+        word.casefold()
+        for word in re.findall(r"(?<!\w)[A-ZА-ЯЁ][A-Za-zА-Яа-яЁё0-9+#.-]*", text)
+        if word not in ordinary
+    }
+
+
+def _check_named_claims(paragraph: dict, evidence: str) -> None:
+    text = paragraph["text"]
+    cited_words = {word.casefold() for word in re.findall(r"[\w+#.-]+", evidence)}
+    protected_name = paragraph.get("kind") in {"entry", "role"}
+    if protected_name and not _protected_entity_words(text) <= cited_words:
+        raise PolicyViolation("Employment or role name is not supported by cited facts")
+    for claim in re.finditer(
+        r"\bat\s+([A-ZА-ЯЁ][A-Za-zА-Яа-яЁё0-9&._-]*"
+        r"(?:\s+[A-ZА-ЯЁ][A-Za-zА-Яа-яЁё0-9&._-]*){0,3})",
+        text,
+    ):
+        if not _protected_entity_words(claim.group(1)) <= cited_words:
+            raise PolicyViolation("Employer name is not supported by cited facts")
 
 
 def validate_draft(draft: dict, context: dict) -> dict:
@@ -89,6 +125,21 @@ def validate_draft(draft: dict, context: dict) -> dict:
     if len(canonical_text(result)) > 45000:
         raise PolicyViolation("Document is too long")
     _safe_text(result["title"])
+    identity = [fact["text"] for fact in facts if fact.get("kind") == "title"]
+    title_words = result["title"].casefold().split()
+    if identity and any(
+        title_words and title_words[0] == value.casefold().split()[0]
+        and " ".join(title_words) != " ".join(value.casefold().split())
+        for value in identity
+    ):
+        raise PolicyViolation("Document title differs from confirmed candidate identity")
+    normalized_title = " ".join(result["title"].casefold().split())
+    if context.get("kind") == "cv" and any(
+        " ".join(paragraph["text"].casefold().split()) == normalized_title
+        for section in result["sections"]
+        for paragraph in section["paragraphs"]
+    ):
+        raise PolicyViolation("CV title must not be repeated in the document body")
     for section in result["sections"]:
         if section["heading"]:
             _safe_text(section["heading"])
@@ -98,6 +149,7 @@ def validate_draft(draft: dict, context: dict) -> dict:
             if len(set(ids)) != len(ids) or not set(ids).issubset(fact_map):
                 raise PolicyViolation("Missing, duplicate or fabricated evidence references")
             evidence = " ".join(fact_map[fact_id] for fact_id in ids)
+            _check_named_claims(paragraph, evidence)
             numeric = r"(?<![\w])\d+(?:[.,]\d+)?(?![\w])"
             if not set(re.findall(numeric, paragraph["text"])) <= set(
                 re.findall(numeric, evidence)
@@ -111,7 +163,7 @@ def validate_draft(draft: dict, context: dict) -> dict:
     return result
 
 
-def validate_visual_review(
+def bind_visual_review(
     review: dict, draft: dict, template_reference: dict, rendered_reference: dict
 ) -> dict:
     try:
@@ -124,6 +176,17 @@ def validate_visual_review(
         or result["draft_hash"] != content_hash(draft)
     ):
         raise PolicyViolation("Visual review belongs to different files")
+    if result["verdict"] == "pass" and result["issues"]:
+        raise PolicyViolation("Visual reviewer returned conflicting approval")
+    if result["verdict"] == "revise" and not result["issues"]:
+        raise PolicyViolation("Visual reviewer must explain required changes")
+    return result
+
+
+def validate_visual_review(
+    review: dict, draft: dict, template_reference: dict, rendered_reference: dict
+) -> dict:
+    result = bind_visual_review(review, draft, template_reference, rendered_reference)
     if result["verdict"] != "pass" or result["issues"]:
         raise PolicyViolation("Проверка оформления не пройдена: " + "; ".join(result["issues"]))
     return result

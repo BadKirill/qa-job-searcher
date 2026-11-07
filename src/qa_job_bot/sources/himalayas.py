@@ -16,6 +16,8 @@ class HimalayasSource(JobSource):
     endpoint = "https://himalayas.app/jobs/api/search"
     queries = (
         "qa engineer",
+        "manual qa",
+        "full stack qa",
         "qa lead",
         "sdet",
         "quality engineer",

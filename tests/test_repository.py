@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -98,8 +99,6 @@ def test_repository_updates_payload_preserves_first_seen_and_delivery(tmp_path: 
         first_seen = db.execute("SELECT first_seen_at FROM jobs").fetchone()[0]
     changed = replace(
         job,
-        source="other",
-        source_id="2",
         score=99,
         salary="EUR 5000",
         description="Full updated text",
@@ -108,7 +107,7 @@ def test_repository_updates_payload_preserves_first_seen_and_delivery(tmp_path: 
     assert repository.upsert_jobs([changed]) == set()
     with repository._connect() as db:
         row = db.execute("SELECT * FROM jobs").fetchone()
-        assert row["source"] == "other"
+        assert row["source"] == "source"
         assert row["url"] == "https://jobs.example/new"
         assert row["first_seen_at"] == first_seen
         assert json.loads(row["payload"])["description"] == "Full updated text"
@@ -120,6 +119,67 @@ def test_repository_updates_payload_preserves_first_seen_and_delivery(tmp_path: 
     repository.set_subscription(123, True)
     repository.set_subscription(123, False)
     assert repository.subscribed_chats() == []
+
+
+def test_collision_gets_distinct_stable_id_and_preserves_legacy_history(tmp_path: Path) -> None:
+    path = tmp_path / "jobs.sqlite3"
+    repository = JobRepository(path)
+    repository.initialize()
+    original = Job("board", "one", "QA Engineer", "Acme", "Europe", "https://jobs.test/one")
+    repository.upsert_jobs([original])
+    original_id = original.fingerprint
+    repository.mark_delivered(123, [original])
+
+    other = Job("board", "two", "QA Engineer", "Acme", "Europe", "https://jobs.test/two")
+    repository.resolve_identities([other])
+    assert other.fingerprint != original_id
+    assert other.legacy_fingerprint == original_id
+    repository.upsert_jobs([other])
+    assert repository.stats()[0] == 2
+    assert repository.undelivered(123, [original, other], 10) == [other]
+
+    restarted = JobRepository(path)
+    restarted.initialize()
+    again = Job("board", "two", "QA Engineer", "Acme", "Europe", "https://jobs.test/two")
+    restarted.resolve_identities([again])
+    assert again.fingerprint == other.fingerprint
+    changed = replace(again, title="Senior QA Engineer", location="Remote Europe")
+    restarted.upsert_jobs([changed])
+    assert changed.fingerprint == other.fingerprint
+    assert restarted.stats()[0] == 2
+
+
+def test_same_url_from_another_source_keeps_one_listing(tmp_path: Path) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite3")
+    repository.initialize()
+    original = Job("board", "one", "QA Engineer", "Acme", "Europe", "https://jobs.test/one")
+    mirror = replace(original, source="mirror", source_id="other")
+    repository.resolve_identities([original, mirror])
+    assert original.fingerprint == mirror.fingerprint
+    repository.upsert_jobs([original, mirror])
+    assert repository.stats()[0] == 1
+
+
+def test_concurrent_colliding_listings_reserve_distinct_persistent_ids(tmp_path: Path) -> None:
+    path = tmp_path / "jobs.sqlite3"
+    repository = JobRepository(path)
+    repository.initialize()
+    jobs = [
+        Job("board", str(index), "QA Engineer", "Acme", "Europe", f"https://jobs.test/{index}")
+        for index in range(2)
+    ]
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        list(workers.map(lambda listing: repository.upsert_jobs([listing]), jobs))
+    assert len({listing.fingerprint for listing in jobs}) == 2
+    assert repository.stats()[0] == 2
+    restarted = JobRepository(path)
+    restarted.initialize()
+    again = [
+        Job("board", str(index), "QA Engineer", "Acme", "Europe", f"https://jobs.test/{index}")
+        for index in range(2)
+    ]
+    restarted.resolve_identities(again)
+    assert [listing.fingerprint for listing in again] == [listing.fingerprint for listing in jobs]
 
 
 def test_existing_empty_database_initializes_without_legacy_backup(tmp_path: Path) -> None:

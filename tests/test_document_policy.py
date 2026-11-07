@@ -4,8 +4,10 @@ import pytest
 
 from qa_job_bot.document_policy import (
     PolicyViolation,
+    bind_visual_review,
     canonical_text,
     content_hash,
+    template_visual_reference,
     validate_draft,
     validate_review,
     validate_visual_review,
@@ -58,6 +60,61 @@ def test_valid_document_and_review():
         canonical_text(document) == "Alex\nExperience\nAlex has 3 years QA experience since 2023."
     )
     assert content_hash({"a": 1, "b": 2}) == content_hash({"b": 2, "a": 1})
+
+
+def test_employer_name_cannot_be_substituted_with_valid_fact_id():
+    source = context()
+    source["template"]["facts"][0]["text"] = "Alex worked at Acme as QA Engineer."
+    document = draft()
+    document["sections"][0]["paragraphs"][0]["text"] = "Alex worked at Globex as QA Engineer."
+    with pytest.raises(PolicyViolation, match="Employer name"):
+        validate_draft(document, source)
+    document["sections"][0]["paragraphs"][0]["text"] = "Alex worked at Acme as QA Engineer."
+    assert validate_draft(document, source)["sections"][0]["paragraphs"][0]["text"] == (
+        "Alex worked at Acme as QA Engineer."
+    )
+
+
+def test_role_line_and_confirmed_identity_are_immutable():
+    source = context()
+    source["template"]["facts"] = [
+        {"id": "name", "kind": "title", "text": "Alex Example"},
+        {"id": "role", "kind": "role", "text": "QA Engineer at Acme"},
+    ]
+    document = {
+        "title": "Alex Example",
+        "language": "en",
+        "sections": [
+            {
+                "heading": "Experience",
+                "paragraphs": [
+                    {"text": "QA Engineer at Acme", "fact_ids": ["role"], "kind": "role"}
+                ],
+            }
+        ],
+    }
+    assert validate_draft(document, source)["title"] == "Alex Example"
+    document["sections"][0]["paragraphs"][0]["text"] = "QA Manager at Acme"
+    with pytest.raises(PolicyViolation, match="Employment or role"):
+        validate_draft(document, source)
+    document["sections"][0]["paragraphs"][0]["text"] = "QA Engineer at Acme"
+    document["title"] = "Alex Someone"
+    with pytest.raises(PolicyViolation, match="candidate identity"):
+        validate_draft(document, source)
+    document["title"] = "Curriculum Vitae"
+    assert validate_draft(document, source)["title"] == "Curriculum Vitae"
+
+
+def test_docx_visual_identity_uses_source_hash_or_pinned_facts_and_rejects_bad_hash():
+    template = {"source_sha256": "a" * 64, "facts": [{"id": "f1", "text": "QA"}]}
+    assert template_visual_reference(template) == {"sha256": "a" * 64}
+    template.pop("source_sha256")
+    assert template_visual_reference(template) == {
+        "sha256": content_hash({"facts": template["facts"], "style": {}})
+    }
+    template["source_sha256"] = "not-a-sha"
+    with pytest.raises(PolicyViolation, match="visual identity"):
+        template_visual_reference(template)
 
 
 @pytest.mark.parametrize(
@@ -176,6 +233,10 @@ def test_visual_review_binds_both_files_and_document():
         validate_visual_review(result, document, {"sha256": "a" * 64}, {"sha256": "b" * 64})
         == result
     )
+    revised = result | {"verdict": "revise", "issues": ["Increase title spacing"]}
+    assert bind_visual_review(
+        revised, document, {"sha256": "a" * 64}, {"sha256": "b" * 64}
+    ) == revised
 
 
 @pytest.mark.parametrize(
@@ -210,6 +271,14 @@ def test_paragraph_roles_are_validated_and_legacy_hashes_preserved():
     paragraph["kind"] = "script"
     with pytest.raises(PolicyViolation):
         validate_draft(document, context())
+
+
+def test_cv_title_cannot_be_repeated_as_a_body_paragraph():
+    document = draft()
+    document["sections"][0]["paragraphs"][0]["text"] = document["title"]
+    with pytest.raises(PolicyViolation, match="must not be repeated"):
+        validate_draft(document, context())
+    assert validate_draft(document, context() | {"kind": "cover_letter"})
 
 
 def test_long_experience_section_keeps_all_entries_with_bounded_size():

@@ -19,7 +19,13 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import BaseDocTemplate, Frame, HRFlowable, PageTemplate, Paragraph, Spacer
 
-from qa_job_bot.document_layout import docx_rule, docx_style, pdf_style, typography
+from qa_job_bot.document_layout import (
+    cover_letter_style,
+    docx_rule,
+    docx_style,
+    pdf_style,
+    typography,
+)
 from qa_job_bot.document_policy import Draft, canonical_text
 from qa_job_bot.pdf_template import PdfTemplateError, extract_pdf_template
 
@@ -213,10 +219,48 @@ def _pdf_font() -> str:
     raise DocumentFileError("A Unicode PDF font is required")
 
 
-def render_documents(draft: dict, template: dict, output_dir: Path) -> list[dict]:
+def effective_document_style(template: dict, document_kind: str) -> dict:
+    if document_kind not in {"cv", "cover_letter"}:
+        raise DocumentFileError("Unsupported document kind")
+    style = cover_letter_style() if document_kind == "cover_letter" else template.get("style", {})
+    geometry = _geometry(style)
+    try:
+        roles = typography(style, geometry)
+    except (ValueError, TypeError, KeyError) as error:
+        raise DocumentFileError("Unsupported template typography") from error
+    for role in ("title", "header"):
+        roles[role]["alignment"] = "center"
+    return {"geometry": geometry, "typography": roles}
+
+
+def _paragraph_override(template: dict, paragraph: dict, role: str, document_kind: str):
+    if document_kind != "cv" or len(paragraph["fact_ids"]) != 1:
+        return None
+    fact_id = paragraph["fact_ids"][0]
+    fact = next((item for item in template.get("facts", []) if item.get("id") == fact_id), None)
+    if fact is None:
+        return None
+    source_role = {
+        "body": "body",
+        "bullet": "body",
+        "entry": "entry",
+        "role": "italic",
+        "contact": "header",
+        "heading": "heading",
+        "title": "title",
+    }.get(fact.get("kind", "body"))
+    if source_role != role:
+        return None
+    return template.get("style", {}).get("paragraph_typography", {}).get(fact_id)
+
+
+def render_documents(
+    draft: dict, template: dict, output_dir: Path, document_kind: str = "cv"
+) -> list[dict]:
     draft = Draft.model_validate(draft).model_dump()
     output_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    geometry = _geometry(template.get("style", {}))
+    appearance = effective_document_style(template, document_kind)
+    geometry, roles = appearance["geometry"], appearance["typography"]
     document = Document()
     section = document.sections[0]
     for key, value in geometry.items():
@@ -224,16 +268,16 @@ def render_documents(draft: dict, template: dict, output_dir: Path) -> list[dict
             setattr(section, key, Pt(value))
         elif key.startswith("margin_"):
             setattr(section, key.removeprefix("margin_") + "_margin", Pt(value))
-    try:
-        roles = typography(template.get("style", {}), geometry)
-    except (ValueError, TypeError, KeyError) as error:
-        raise DocumentFileError("Unsupported template typography") from error
     names = {"body": "Normal", "title": "Title", "heading": "Heading 1"}
     for role, spec in roles.items():
         name = names.setdefault(role, "CV " + role)
         if name not in document.styles:
             document.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
-        docx_style(document.styles[name], spec)
+        docx_style(
+            document.styles[name],
+            spec,
+            keep_with_next=role in {"title", "header", "heading", "entry", "italic"},
+        )
     for border in document.styles["Title"].element.xpath(".//w:pBdr"):
         border.getparent().remove(border)
     document.add_paragraph(draft["title"], style="Title")
@@ -245,7 +289,9 @@ def render_documents(draft: dict, template: dict, output_dir: Path) -> list[dict
     styles["bullet"].leftIndent = geometry["font_size"] * 1.4
     styles["bullet"].firstLineIndent = -geometry["font_size"]
     story = [Paragraph(escape(draft["title"]), styles["title"])]
+    in_cv_header = document_kind == "cv"
     for item in draft["sections"]:
+        in_cv_header = in_cv_header and not item["heading"].strip()
         if item["heading"]:
             section_heading = document.add_paragraph(item["heading"], style="Heading 1")
             story.append(Paragraph(escape(item["heading"]), styles["heading"]))
@@ -260,16 +306,11 @@ def render_documents(draft: dict, template: dict, output_dir: Path) -> list[dict
                 line.keepWithNext = True
                 story.append(line)
         for paragraph in item["paragraphs"]:
-            kind = paragraph.get("kind", "body")
+            kind = "contact" if in_cv_header else paragraph.get("kind", "body")
             role = {"contact": "header", "role": "italic", "bullet": "body"}.get(kind, kind)
             text = paragraph["text"]
             name = names[role]
-            appearance = template.get("style", {}).get("paragraph_typography", {})
-            override = (
-                appearance.get(paragraph["fact_ids"][0])
-                if len(paragraph["fact_ids"]) == 1
-                else None
-            )
+            override = _paragraph_override(template, paragraph, role, document_kind)
             paragraph_style = styles["bullet" if kind == "bullet" else role]
             if override:
                 try:
@@ -278,10 +319,16 @@ def render_documents(draft: dict, template: dict, output_dir: Path) -> list[dict
                     ]
                 except (ValueError, TypeError, KeyError) as error:
                     raise DocumentFileError("Unsupported paragraph typography") from error
+                if role == "header":
+                    spec["alignment"] = "center"
                 name = "CV paragraph " + str(len(document.paragraphs))
                 custom = document.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
                 custom.base_style = document.styles[names[role]]
-                docx_style(custom, spec)
+                docx_style(
+                    custom,
+                    spec,
+                    keep_with_next=role in {"header", "heading", "entry", "italic"},
+                )
                 paragraph_style = pdf_style(role, spec, pdf_font, text)
                 paragraph_style.leftIndent = styles[
                     "bullet" if kind == "bullet" else role

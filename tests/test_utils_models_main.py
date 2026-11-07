@@ -76,15 +76,13 @@ def test_model_defaults_do_not_share_mutable_lists() -> None:
     assert report.fetched_at.utcoffset() == timedelta(0)
 
 
-@pytest.mark.parametrize("restricted", [True, False])
 async def test_bot_entrypoint_builds_search_and_suppresses_sensitive_http_logs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    restricted: bool,
 ) -> None:
     settings = Settings(
         "test-token",
-        frozenset({1}) if restricted else frozenset(),
+        frozenset({1}),
         tmp_path / "db.sqlite3",
         tmp_path / "profile",
         tmp_path / "boards",

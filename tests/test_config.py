@@ -19,6 +19,10 @@ def test_load_project_config() -> None:
     assert "serbia" in profile.allowed_locations
     assert "junior" in profile.excluded_title_keywords
     assert "middle" in profile.preferred_seniority
+    assert "senior" in profile.preferred_seniority
+    assert "lead" not in profile.preferred_seniority
+    assert "manual qa" in profile.focus_qa_keywords
+    assert "full stack qa" in profile.focus_qa_keywords
     assert not profile.allow_unknown_remote_location
     assert len(channels) == 13
     assert "opento_dev" in channels

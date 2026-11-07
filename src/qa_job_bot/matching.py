@@ -259,6 +259,16 @@ def _has_unacceptable_restriction(text: str, profile: SearchProfile) -> bool:
         if _contains(segment, profile.blocked_locations) and not _has_allowed_scope(
             segment, profile
         ):
+            employer_location = re.search(
+                r"\b(?:us|usa)[- ]based\s+(?:team|office|company|headquarters)\b", segment
+            )
+            candidate_restriction = re.search(
+                r"\b(?:applicants?|candidates?|must|need to|required|eligible|reside|"
+                r"hiring only|hire only)\b",
+                segment,
+            )
+            if employer_location and not candidate_restriction:
+                continue
             return True
     return False
 
@@ -391,6 +401,11 @@ def match_job(job: Job, profile: SearchProfile) -> MatchResult:
     if seniority:
         score += 15
         reasons.append(f"уровень: {seniority[0]}")
+
+    focus = _contains(searchable, profile.focus_qa_keywords)
+    if focus:
+        score += 20
+        reasons.append(f"фокус: {', '.join(focus[:2])}")
 
     domains = _contains(searchable, profile.domain_keywords)
     if domains:

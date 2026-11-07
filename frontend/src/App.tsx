@@ -80,6 +80,14 @@ export function Workspace({ onLogout }: { onLogout: () => void }) {
             Вакансии<span className="nav-arrow">↗</span>
           </button>
           <button
+            className={view === "applied" ? "nav-item selected" : "nav-item"}
+            onClick={() => setView("applied")}
+            aria-current={view === "applied" ? "page" : undefined}
+          >
+            <Icon name="applied" />
+            Applied
+          </button>
+          <button
             className={view === "archive" ? "nav-item selected" : "nav-item"}
             onClick={() => setView("archive")}
             aria-current={view === "archive" ? "page" : undefined}

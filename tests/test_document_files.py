@@ -262,6 +262,8 @@ def test_render_rejects_invalid_geometry_fonts_and_text_mismatch(tmp_path, monke
     monkeypatch.setattr(files, "canonical_text", lambda _: "different")
     with pytest.raises(files.DocumentFileError, match="differs"):
         files.render_documents(document(), {}, tmp_path)
+    with pytest.raises(files.DocumentFileError, match="kind"):
+        files.render_documents(document(), {}, tmp_path, "memo")
 
 
 @pytest.mark.parametrize(

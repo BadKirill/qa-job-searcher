@@ -122,6 +122,24 @@ async def test_empty_sources_produce_valid_empty_report(tmp_path: Path) -> None:
     assert repository.stats() == (0, None)
 
 
+async def test_service_keeps_distinct_roles_with_identical_title_company_and_location(
+    tmp_path: Path,
+) -> None:
+    first = Job(
+        "board", "one", "QA Engineer", "Acme", "Europe", "https://jobs.test/one", remote=True
+    )
+    second = replace(first, source_id="two", url="https://jobs.test/two")
+    repository = JobRepository(tmp_path / "jobs.sqlite3")
+    repository.initialize()
+    service = JobSearchService(SearchProfile(), [StubSource([first, second])], repository, 1)
+
+    report = await service.refresh()
+
+    assert len(report.jobs) == 2
+    assert first.fingerprint != second.fingerprint
+    assert repository.stats()[0] == 2
+
+
 async def test_refresh_lock_prevents_overlapping_fetches(tmp_path: Path) -> None:
     active = 0
     maximum = 0

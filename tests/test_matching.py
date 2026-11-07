@@ -71,9 +71,66 @@ def test_accepts_and_prioritizes_middle_title() -> None:
     assert "уровень: middle" in result.reasons
 
 
+@pytest.mark.parametrize(
+    "title,description,term",
+    [
+        ("Middle Manual QA Engineer", "Regression testing", "manual qa"),
+        ("Senior QA Engineer", "Full-stack QA for web and API", "full-stack qa"),
+        ("Senior QA Engineer", "Ручное тестирование web и API", "ручное тестирование"),
+    ],
+)
+def test_prioritizes_middle_senior_manual_and_fullstack_qa(
+    title: str, description: str, term: str
+) -> None:
+    focused = match_job(make_job(title=title, description=description), SearchProfile())
+    generic = match_job(
+        make_job(title="Senior QA Engineer", description="Regression coverage"), SearchProfile()
+    )
+    assert focused.accepted
+    assert focused.score >= generic.score + 20
+    assert any(reason.startswith(f"фокус: {term}") for reason in focused.reasons)
+
+
+def test_focus_terms_are_capped_and_lead_is_not_a_middle_senior_signal() -> None:
+    focused = match_job(
+        make_job(
+            title="QA Lead",
+            description="Manual QA, manual testing, and full stack QA for a SaaS product",
+        ),
+        SearchProfile(),
+    )
+    assert focused.score == 88
+    assert not any(reason.startswith("уровень:") for reason in focused.reasons)
+    assert "фокус: manual qa, manual testing" in focused.reasons
+
+
 def test_rejects_explicit_us_remote() -> None:
     result = match_job(
         make_job(location="United States (Remote)", description="Remote-first fintech"),
+        SearchProfile(),
+    )
+    assert not result.accepted
+    assert result.location_status == "blocked"
+
+
+def test_worldwide_role_is_not_rejected_by_us_based_team() -> None:
+    result = match_job(
+        make_job(
+            location="Worldwide",
+            description="Join our US-based team. We hire worldwide for this remote QA role.",
+        ),
+        SearchProfile(),
+    )
+    assert result.accepted
+    assert result.location_status == "allowed"
+
+
+def test_us_based_candidate_restriction_still_blocks_worldwide_label() -> None:
+    result = match_job(
+        make_job(
+            location="Worldwide",
+            description="Our US-based team requires candidates to reside in the US.",
+        ),
         SearchProfile(),
     )
     assert not result.accepted
@@ -332,8 +389,8 @@ def test_onsite_allowed_when_remote_requirement_explicitly_disabled() -> None:
 def test_contract_salary_and_score_cap() -> None:
     result = match_job(
         make_job(
-            description="fintech crypto saas playwright selenium cypress "
-            "python typescript contractor",
+            description="fintech crypto saas manual testing functional testing "
+            "regression testing exploratory testing api testing contractor",
             salary="100000 EUR",
         ),
         SearchProfile(),
