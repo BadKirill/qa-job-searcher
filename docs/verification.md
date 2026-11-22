@@ -464,3 +464,18 @@ JSON-конфигурации разобраны, `git diff --cached --check` п
 Добавлен отдельный CI для `multiuser/`; его результаты GitHub Actions должны
 проверяться отдельно от локальных результатов. CI прежней версии сохранён.
 Рабочий сервер этим этапом не обновлялся; платные API не вызывались.
+
+## 22 ноября 2026: совместимость ОС в GitHub Actions
+
+Первые GitHub-запуски коммита `d84ccbe` остановились до тестов на шаге
+`npx playwright install --with-deps chromium`. `ubuntu-latest` выбрал Ubuntu
+26.04; закреплённый Playwright 1.56.1 завершил установку сообщением
+`Playwright does not support chromium on ubuntu26.04-x64`.
+
+- [Quality: неуспешный запуск](https://github.com/BadKirill/qa-job-searcher/actions/runs/45078881686).
+- [Multiuser Quality: неуспешный quality gate и успешная Docker-репетиция](https://github.com/BadKirill/qa-job-searcher/actions/runs/45078882520).
+
+В обоих workflows ОС закреплена как `ubuntu-24.04`; она явно поддерживается
+установленным Playwright. Тесты, пороги, зависимости и код приложения не менялись.
+Проверка исправления требует полного нового запуска обоих workflows в GitHub;
+прежние локальные результаты не подтверждают установку браузера на Linux runner.
