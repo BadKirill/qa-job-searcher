@@ -1,0 +1,30 @@
+{
+  "Rules": [
+    {
+      "ID": "DailyBackups14Days",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": "backups/daily-"
+      },
+      "Expiration": {
+        "Days": 14
+      },
+      "NoncurrentVersionExpiration": {
+        "NoncurrentDays": 14
+      },
+      "AbortIncompleteMultipartUpload": {
+        "DaysAfterInitiation": 7
+      }
+    },
+    {
+      "ID": "RemoveDailyExpiredDeleteMarkers",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": "backups/daily-"
+      },
+      "Expiration": {
+        "ExpiredObjectDeleteMarker": true
+      }
+    }
+  ]
+}

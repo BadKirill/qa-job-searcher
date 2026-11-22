@@ -1,0 +1,22 @@
+[Unit]
+Description=QA Job Searcher PostgreSQL and backend services
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+WorkingDirectory=/srv/qa-job-searcher
+ExecStart=/usr/bin/docker compose -p job-searcher-aws --env-file .runtime/runtime.env -f compose.runtime.yaml -f compose.aws.json up -d --no-build --wait --wait-timeout 180
+ExecStop=/usr/bin/docker compose -p job-searcher-aws --env-file .runtime/runtime.env -f compose.runtime.yaml -f compose.aws.json stop
+TimeoutStartSec=300
+TimeoutStopSec=180
+Restart=on-failure
+RestartSec=10
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

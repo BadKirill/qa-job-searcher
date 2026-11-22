@@ -1,0 +1,19 @@
+[Unit]
+Description=QA Job Searcher HTTPS tunnel
+After=qa-job-searcher.service network-online.target
+Wants=network-online.target
+Requires=qa-job-searcher.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env ngrok http 8000 --config=/etc/qa-job-searcher-ngrok.yml --url=https://baboon-arriving-visually.ngrok-free.app --inspect=false --log=stdout --log-level=warn
+Restart=always
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

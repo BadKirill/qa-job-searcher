@@ -571,3 +571,16 @@ def test_main_invokes_loopback_server(monkeypatch):
     monkeypatch.setattr(web.uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
     web.main()
     assert calls[0][1]["host"] == "127.0.0.1" and not calls[0][1]["proxy_headers"]
+
+
+def test_main_can_bind_container_network_only_when_configured(monkeypatch):
+    calls = []
+    monkeypatch.setattr(web, "create_app", lambda: "app")
+    monkeypatch.setattr(web.uvicorn, "run", lambda *args, **kwargs: calls.append(kwargs))
+    monkeypatch.setenv("WEB_HOST", "0.0.0.0")
+    web.main()
+    assert calls[0]["host"] == "0.0.0.0"
+    assert not calls[0]["proxy_headers"]
+    monkeypatch.setenv("WEB_HOST", "example.com")
+    with pytest.raises(ValueError, match="WEB_HOST"):
+        web.main()

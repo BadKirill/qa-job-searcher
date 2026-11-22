@@ -10,7 +10,7 @@ class OpenAIConfigurationError(ValueError):
     pass
 
 
-def private_text(path: Path, limit: int) -> str:
+def private_text(path: Path, limit: int, subject: str = "OpenAI configuration") -> str:
     try:
         descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(descriptor, "rb") as stream:
@@ -21,13 +21,13 @@ def private_text(path: Path, limit: int) -> str:
                 or stat.S_IMODE(info.st_mode) & 0o077
                 or info.st_size > limit
             ):
-                raise OpenAIConfigurationError("OpenAI configuration requires a private owner file")
+                raise OpenAIConfigurationError(f"{subject} requires a private owner file")
             raw = stream.read(limit + 1)
             if len(raw) > limit:
-                raise OpenAIConfigurationError("OpenAI configuration exceeds the size limit")
+                raise OpenAIConfigurationError(f"{subject} exceeds the size limit")
             return raw.decode("utf-8").strip()
     except (OSError, UnicodeError) as error:
-        raise OpenAIConfigurationError("OpenAI configuration is missing or unreadable") from error
+        raise OpenAIConfigurationError(f"{subject} is missing or unreadable") from error
 
 
 @dataclass(frozen=True)
@@ -55,7 +55,11 @@ class OpenAISettings:
     @classmethod
     def load(cls, data_dir: Path = Path("data")):
         try:
-            config = json.loads(private_text(data_dir / "openai-agent.json", 4096))
+            config_path = Path(
+                os.getenv("OPENAI_AGENT_CONFIG_FILE", str(data_dir / "openai-agent.json"))
+            )
+            key_path = Path(os.getenv("OPENAI_API_KEY_FILE", str(data_dir / "openai-api-key")))
+            config = json.loads(private_text(config_path, 4096))
             if not isinstance(config, dict) or set(config) - {
                 "agent_id",
                 "model",
@@ -63,6 +67,6 @@ class OpenAISettings:
                 "project_id",
             }:
                 raise OpenAIConfigurationError("OpenAI agent configuration has unknown fields")
-            return cls(api_key=private_text(data_dir / "openai-api-key", 1024), **config)
+            return cls(api_key=private_text(key_path, 1024), **config)
         except (TypeError, json.JSONDecodeError) as error:
             raise OpenAIConfigurationError("OpenAI agent configuration is invalid") from error

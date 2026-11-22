@@ -1,0 +1,55 @@
+name: Deploy VPS
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy
+        shell: bash
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_AGENT_CONFIG_JSON: ${{ secrets.OPENAI_AGENT_CONFIG_JSON }}
+          NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+          TELEGRAM_ALLOWED_USER_IDS: ${{ vars.TELEGRAM_ALLOWED_USER_IDS }}
+        run: |
+          set -euo pipefail
+          : "${VPS_HOST:?VPS_HOST is required}"
+          : "${VPS_USER:?VPS_USER is required}"
+          : "${VPS_SSH_PRIVATE_KEY:?VPS_SSH_PRIVATE_KEY is required}"
+          : "${VPS_KNOWN_HOSTS:?VPS_KNOWN_HOSTS is required}"
+          : "${OPENAI_API_KEY:?OPENAI_API_KEY is required}"
+          : "${OPENAI_AGENT_CONFIG_JSON:?OPENAI_AGENT_CONFIG_JSON is required}"
+          : "${NGROK_AUTHTOKEN:?NGROK_AUTHTOKEN is required}"
+          : "${APP_DOMAIN:?APP_DOMAIN is required}"
+          [[ "$VPS_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ "$VPS_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          [[ "$APP_DOMAIN" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$ ]]
+          [[ "$NGROK_AUTHTOKEN" =~ ^[A-Za-z0-9_=-]{10,500}$ ]]
+          python -c 'import json,os; value=json.loads(os.environ["OPENAI_AGENT_CONFIG_JSON"]); assert isinstance(value,dict) and value.get("agent_id")'
+          ssh_dir="$RUNNER_TEMP/qa-ssh"
+          install -d -m 700 "$ssh_dir"
+          printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > "$ssh_dir/key"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          chmod 600 "$ssh_dir/key" "$ssh_dir/known_hosts"
+          ssh_options=(-i "$ssh_dir/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts")
+          target="$VPS_USER@$VPS_HOST"
+          ssh "${ssh_options[@]}" "$target" 'umask 077; mkdir -p "$HOME/qa-job-searcher/data" "$HOME/qa-job-searcher/secrets"'
+          printf '%s' "$OPENAI_API_KEY" | ssh "${ssh_options[@]}" "$target" 'umask 077; cat > "$HOME/qa-job-searcher/secrets/openai-api-key"'
+          printf '%s' "$OPENAI_AGENT_CONFIG_JSON" | ssh "${ssh_options[@]}" "$target" 'umask 077; cat > "$HOME/qa-job-searcher/secrets/openai-agent.json"'
+          printf 'NGROK_AUTHTOKEN=%s\n' "$NGROK_AUTHTOKEN" | ssh "${ssh_options[@]}" "$target" 'umask 077; cat > "$HOME/qa-job-searcher/secrets/ngrok.env"'
+          if [[ -n "$TELEGRAM_BOT_TOKEN" ]]; then
+            printf '%s' "$TELEGRAM_BOT_TOKEN" | ssh "${ssh_options[@]}" "$target" 'umask 077; cat > "$HOME/qa-job-searcher/secrets/telegram-bot-token"'
+          fi
+          ssh "${ssh_options[@]}" "$target" bash -s -- "$GITHUB_SHA" "$APP_DOMAIN" "$TELEGRAM_ALLOWED_USER_IDS" < scripts/deploy-vps.sh

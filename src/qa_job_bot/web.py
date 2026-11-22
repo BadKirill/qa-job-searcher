@@ -534,9 +534,12 @@ def create_app(settings: WebSettings | None = None, store: WebStore | None = Non
 
 
 def main() -> None:
+    host = os.getenv("WEB_HOST", "127.0.0.1")
+    if host not in {"127.0.0.1", "0.0.0.0"}:
+        raise ValueError("WEB_HOST must be 127.0.0.1 or 0.0.0.0")
     uvicorn.run(
         create_app(),
-        host="127.0.0.1",
+        host=host,
         port=int(os.getenv("WEB_PORT", "8000")),
         proxy_headers=False,
         access_log=False,

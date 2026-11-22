@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from qa_job_bot.openai_config import private_text
+
 DEFAULT_ROLE_KEYWORDS = (
     "head of qa",
     "qa lead",
@@ -221,7 +223,12 @@ class Settings:
 
     @classmethod
     def from_env(cls, require_token: bool = True) -> Settings:
-        token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+        token_file = os.getenv("TELEGRAM_BOT_TOKEN_FILE", "").strip()
+        token = (
+            private_text(Path(token_file), 1024, "Telegram token")
+            if require_token and token_file
+            else os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+        )
         if require_token and not token:
             raise ValueError("TELEGRAM_BOT_TOKEN is required")
         raw_ids = os.getenv("TELEGRAM_ALLOWED_USER_IDS", "")

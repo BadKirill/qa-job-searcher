@@ -21,6 +21,7 @@ def test_missing_configuration_uses_defaults(tmp_path: Path) -> None:
 def test_environment_defaults_and_token_requirement(monkeypatch: pytest.MonkeyPatch) -> None:
     names = (
         "TELEGRAM_BOT_TOKEN",
+        "TELEGRAM_BOT_TOKEN_FILE",
         "TELEGRAM_ALLOWED_USER_IDS",
         "DATABASE_PATH",
         "SEARCH_PROFILE_PATH",
@@ -43,6 +44,35 @@ def test_environment_defaults_and_token_requirement(monkeypatch: pytest.MonkeyPa
     assert settings.database_path == Path("data/jobs.sqlite3")
     assert settings.search_interval_minutes == 180
     assert settings.http_timeout_seconds == 25
+
+
+def test_telegram_token_private_file_takes_precedence(monkeypatch, tmp_path):
+    path = tmp_path / "telegram-token"
+    path.write_text("123456:mounted-token\n")
+    path.chmod(0o600)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "unused-env-token")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN_FILE", str(path))
+    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "42")
+    assert Settings.from_env().telegram_bot_token == "123456:mounted-token"
+    assert Settings.from_env(require_token=False).telegram_bot_token == "unused-env-token"
+
+
+@pytest.mark.parametrize("problem", ["missing", "public", "symlink", "empty"])
+def test_telegram_token_file_fails_closed(monkeypatch, tmp_path, problem):
+    path = tmp_path / "telegram-token"
+    if problem == "public":
+        path.write_text("123456:token")
+        path.chmod(0o644)
+    elif problem == "symlink":
+        path.symlink_to(tmp_path / "target")
+    elif problem == "empty":
+        path.write_text("")
+        path.chmod(0o600)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN_FILE", str(path))
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "unused-env-token")
+    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "42")
+    with pytest.raises(ValueError):
+        Settings.from_env()
 
 
 def test_environment_limits_and_user_ids(monkeypatch: pytest.MonkeyPatch) -> None:

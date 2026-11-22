@@ -1,0 +1,15 @@
+[Unit]
+Description=Back up QA Job Searcher PostgreSQL and private files
+After=qa-job-searcher.service network-online.target
+Wants=network-online.target
+Requires=qa-job-searcher.service
+StartLimitIntervalSec=3600
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/qa-job-searcher-backup
+TimeoutStartSec=15min
+UMask=0077
+Restart=on-failure
+RestartSec=300

@@ -1,0 +1,455 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "QA Job Searcher: low-cost ARM backend and PostgreSQL migration in eu-north-1",
+  "Parameters": {
+    "ImageId": {
+      "Type": "AWS::EC2::Image::Id",
+      "Default": "ami-09aa4a5ab990926c8"
+    },
+    "VpcId": {
+      "Type": "AWS::EC2::VPC::Id",
+      "Default": "vpc-08f019956933548db"
+    },
+    "SubnetId": {
+      "Type": "AWS::EC2::Subnet::Id",
+      "Default": "subnet-0422bf192bfef4352"
+    }
+  },
+  "Resources": {
+    "ArtifactsBucket": {
+      "Type": "AWS::S3::Bucket",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "BucketName": {
+          "Fn::Sub": "qa-job-searcher-${AWS::AccountId}-${AWS::Region}"
+        },
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }
+          ]
+        },
+        "VersioningConfiguration": {
+          "Status": "Enabled"
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "IgnorePublicAcls": true,
+          "BlockPublicPolicy": true,
+          "RestrictPublicBuckets": true
+        },
+        "OwnershipControls": {
+          "Rules": [
+            {
+              "ObjectOwnership": "BucketOwnerEnforced"
+            }
+          ]
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "qa-job-searcher"
+          },
+          {
+            "Key": "Project",
+            "Value": "QAJobSearcher"
+          },
+          {
+            "Key": "Environment",
+            "Value": "production"
+          },
+          {
+            "Key": "WorkloadType",
+            "Value": "web-server"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          },
+          {
+            "Key": "Owner",
+            "Value": "ProjectOwner"
+          },
+          {
+            "Key": "CostCenter",
+            "Value": "Personal"
+          },
+          {
+            "Key": "CreatedDate",
+            "Value": "2026-11-21"
+          },
+          {
+            "Key": "Backup",
+            "Value": "Daily"
+          }
+        ]
+      }
+    },
+    "BucketPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": {
+          "Ref": "ArtifactsBucket"
+        },
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "RequireTLS",
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "ArtifactsBucket",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::Sub": "${ArtifactsBucket.Arn}/*"
+                }
+              ],
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "InstanceRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ec2.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+        ],
+        "Policies": [
+          {
+            "PolicyName": "ProjectArtifactsAndBackups",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "${ArtifactsBucket.Arn}/artifacts/*"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:PutObject",
+                    "s3:AbortMultipartUpload"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "${ArtifactsBucket.Arn}/backups/*"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "qa-job-searcher"
+          },
+          {
+            "Key": "Project",
+            "Value": "QAJobSearcher"
+          },
+          {
+            "Key": "Environment",
+            "Value": "production"
+          },
+          {
+            "Key": "WorkloadType",
+            "Value": "web-server"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          },
+          {
+            "Key": "Owner",
+            "Value": "ProjectOwner"
+          },
+          {
+            "Key": "CostCenter",
+            "Value": "Personal"
+          },
+          {
+            "Key": "CreatedDate",
+            "Value": "2026-11-21"
+          },
+          {
+            "Key": "Backup",
+            "Value": "Daily"
+          }
+        ]
+      }
+    },
+    "InstanceProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Roles": [
+          {
+            "Ref": "InstanceRole"
+          }
+        ]
+      }
+    },
+    "SecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "QA Job Searcher: no inbound access; SSM and ngrok use outbound TLS",
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "SecurityGroupEgress": [
+          {
+            "IpProtocol": "-1",
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Operating system updates, SSM, AWS, ngrok, and job sources"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "qa-job-searcher"
+          },
+          {
+            "Key": "Project",
+            "Value": "QAJobSearcher"
+          },
+          {
+            "Key": "Environment",
+            "Value": "production"
+          },
+          {
+            "Key": "WorkloadType",
+            "Value": "web-server"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          },
+          {
+            "Key": "Owner",
+            "Value": "ProjectOwner"
+          },
+          {
+            "Key": "CostCenter",
+            "Value": "Personal"
+          },
+          {
+            "Key": "CreatedDate",
+            "Value": "2026-11-21"
+          },
+          {
+            "Key": "Backup",
+            "Value": "Daily"
+          }
+        ]
+      }
+    },
+    "Instance": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "ImageId": {
+          "Ref": "ImageId"
+        },
+        "InstanceType": "t4g.small",
+        "IamInstanceProfile": {
+          "Ref": "InstanceProfile"
+        },
+        "NetworkInterfaces": [
+          {
+            "DeviceIndex": "0",
+            "AssociatePublicIpAddress": true,
+            "SubnetId": {
+              "Ref": "SubnetId"
+            },
+            "GroupSet": [
+              {
+                "Ref": "SecurityGroup"
+              }
+            ]
+          }
+        ],
+        "BlockDeviceMappings": [
+          {
+            "DeviceName": "/dev/sda1",
+            "Ebs": {
+              "VolumeSize": 20,
+              "VolumeType": "gp3",
+              "Encrypted": true,
+              "DeleteOnTermination": false
+            }
+          }
+        ],
+        "MetadataOptions": {
+          "HttpEndpoint": "enabled",
+          "HttpTokens": "required",
+          "HttpPutResponseHopLimit": 1
+        },
+        "Monitoring": false,
+        "DisableApiTermination": true,
+        "CreditSpecification": {
+          "CPUCredits": "standard"
+        },
+        "UserData": {
+          "Fn::Base64": "#!/usr/bin/env bash\nset -euo pipefail\nexport DEBIAN_FRONTEND=noninteractive\numask 077\napt-get update\napt-get upgrade -y\napt-get install -y ca-certificates curl gnupg unzip docker.io docker-compose-v2 unattended-upgrades\ninstall -d -m 0755 /etc/apt/keyrings\ncurl -fsSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc -o /etc/apt/keyrings/ngrok.asc\nchmod 0644 /etc/apt/keyrings/ngrok.asc\nprintf '%s\\n' 'deb [signed-by=/etc/apt/keyrings/ngrok.asc] https://ngrok-agent.s3.amazonaws.com bookworm main' > /etc/apt/sources.list.d/ngrok.list\napt-get update\napt-get install -y ngrok\ncurl -fsSL https://awscli.amazonaws.com/v2/install.sh -o /tmp/qa-aws-install.sh\nbash /tmp/qa-aws-install.sh --system --quiet\ninstall -d -m 0700 /srv/qa-job-searcher /srv/qa-job-searcher/.runtime /var/lib/qa-job-searcher\ninstall -d -m 0755 /etc/docker\nprintf '%s\\n' '{\"log-driver\":\"local\",\"log-opts\":{\"max-size\":\"10m\",\"max-file\":\"3\"}}' > /etc/docker/daemon.json\nsystemctl enable --now docker\nsystemctl restart docker\nif [ ! -e /swapfile ]; then\n    fallocate -l 2G /swapfile\n    chmod 0600 /swapfile\n    mkswap /swapfile\n    printf '%s\\n' '/swapfile none swap sw 0 0' >> /etc/fstab\nfi\nswapon -a\nprintf '%s\\n' 'vm.swappiness=10' > /etc/sysctl.d/90-qa-job-searcher.conf\nsysctl --system\nprintf '%s\\n' 'APT::Periodic::Update-Package-Lists \"1\";' 'APT::Periodic::Unattended-Upgrade \"1\";' > /etc/apt/apt.conf.d/20auto-upgrades\ninstall -d -m 0755 /etc/ssh/sshd_config.d\nprintf '%s\\n' 'PermitRootLogin no' 'PasswordAuthentication no' > /etc/ssh/sshd_config.d/90-qa-job-searcher.conf\nif systemctl is-active --quiet ssh; then\n    systemctl reload ssh\nfi\nif ! snap list amazon-ssm-agent >/dev/null 2>&1; then\n    snap install amazon-ssm-agent --classic\nfi\nsystemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service\ndocker compose version\naws --version\nngrok version\ntouch /var/lib/qa-job-searcher/bootstrap-ready\n"
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "qa-job-searcher"
+          },
+          {
+            "Key": "Project",
+            "Value": "QAJobSearcher"
+          },
+          {
+            "Key": "Environment",
+            "Value": "production"
+          },
+          {
+            "Key": "WorkloadType",
+            "Value": "web-server"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          },
+          {
+            "Key": "Owner",
+            "Value": "ProjectOwner"
+          },
+          {
+            "Key": "CostCenter",
+            "Value": "Personal"
+          },
+          {
+            "Key": "CreatedDate",
+            "Value": "2026-11-21"
+          },
+          {
+            "Key": "Backup",
+            "Value": "Daily"
+          }
+        ]
+      }
+    },
+    "HighCpuAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "QA Job Searcher CPUUtilization",
+        "Namespace": "AWS/EC2",
+        "MetricName": "CPUUtilization",
+        "Dimensions": [
+          {
+            "Name": "InstanceId",
+            "Value": {
+              "Ref": "Instance"
+            }
+          }
+        ],
+        "Statistic": "Average",
+        "Period": 300,
+        "EvaluationPeriods": 2,
+        "Threshold": 80,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "missing"
+      }
+    },
+    "LowCpuCreditsAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "QA Job Searcher CPUCreditBalance",
+        "Namespace": "AWS/EC2",
+        "MetricName": "CPUCreditBalance",
+        "Dimensions": [
+          {
+            "Name": "InstanceId",
+            "Value": {
+              "Ref": "Instance"
+            }
+          }
+        ],
+        "Statistic": "Average",
+        "Period": 300,
+        "EvaluationPeriods": 2,
+        "Threshold": 20,
+        "ComparisonOperator": "LessThanThreshold",
+        "TreatMissingData": "missing"
+      }
+    },
+    "StatusCheckAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "QA Job Searcher StatusCheckFailed",
+        "Namespace": "AWS/EC2",
+        "MetricName": "StatusCheckFailed",
+        "Dimensions": [
+          {
+            "Name": "InstanceId",
+            "Value": {
+              "Ref": "Instance"
+            }
+          }
+        ],
+        "Statistic": "Maximum",
+        "Period": 60,
+        "EvaluationPeriods": 2,
+        "Threshold": 1,
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "TreatMissingData": "missing"
+      }
+    }
+  },
+  "Outputs": {
+    "InstanceId": {
+      "Value": {
+        "Ref": "Instance"
+      }
+    },
+    "ArtifactsBucket": {
+      "Value": {
+        "Ref": "ArtifactsBucket"
+      }
+    },
+    "RoleName": {
+      "Value": {
+        "Ref": "InstanceRole"
+      }
+    },
+    "SecurityGroupId": {
+      "Value": {
+        "Ref": "SecurityGroup"
+      }
+    }
+  }
+}

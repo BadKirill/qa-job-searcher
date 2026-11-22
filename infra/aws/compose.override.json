@@ -1,0 +1,39 @@
+{
+  "services": {
+    "postgres": {
+      "image": "postgres@sha256:846a7ddaa67a4b354ae1d21087b683901aa6113a4ed626d3787cfbf6c85e3e07"
+    },
+    "migrate": {
+      "image": "job-searcher-runtime:aws",
+      "pull_policy": "never"
+    },
+    "api": {
+      "image": "job-searcher-runtime:aws",
+      "pull_policy": "never"
+    },
+    "scheduler": {
+      "image": "job-searcher-runtime:aws",
+      "pull_policy": "never"
+    },
+    "search-worker": {
+      "image": "job-searcher-runtime:aws",
+      "pull_policy": "never"
+    },
+    "chat-worker": {
+      "image": "job-searcher-runtime:aws",
+      "pull_policy": "never"
+    },
+    "document-worker": {
+      "image": "job-searcher-runtime:aws",
+      "pull_policy": "never"
+    },
+    "maintenance": {
+      "image": "job-searcher-runtime:aws",
+      "pull_policy": "never"
+    },
+    "telegram": {
+      "image": "job-searcher-runtime:aws",
+      "pull_policy": "never"
+    }
+  }
+}

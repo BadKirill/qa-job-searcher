@@ -1,0 +1,93 @@
+{
+  "profiles": {
+    "qa": {},
+    "developer": {
+      "role_keywords": ["backend engineer"],
+      "excluded_title_keywords": [],
+      "focus_qa_keywords": [],
+      "domain_keywords": [],
+      "skill_keywords": ["python"]
+    },
+    "designer": {
+      "role_keywords": ["product designer"],
+      "excluded_title_keywords": [],
+      "focus_qa_keywords": [],
+      "domain_keywords": [],
+      "skill_keywords": ["figma"],
+      "allowed_locations": ["europe", "germany", "berlin"],
+      "require_remote": false
+    }
+  },
+  "cases": [
+    {
+      "id": "qa-manual",
+      "profile": "qa",
+      "job": {"title": "Middle Manual QA Engineer", "location": "Europe", "description": "Manual testing and API testing for a SaaS product.", "remote": true, "workplace_type": "remote"},
+      "baseline": {"accepted": true, "location_status": "allowed"},
+      "target": {"accepted": true}
+    },
+    {
+      "id": "qa-serbia-hybrid",
+      "profile": "qa",
+      "job": {"title": "Senior QA Engineer", "location": "Belgrade, Serbia", "description": "Hybrid role. Manual testing and SQL.", "remote": false, "workplace_type": "hybrid"},
+      "baseline": {"accepted": true, "location_status": "allowed"},
+      "target": {"accepted": true}
+    },
+    {
+      "id": "qa-junior",
+      "profile": "qa",
+      "job": {"title": "Junior QA Engineer", "location": "Europe", "description": "Manual testing and API testing.", "remote": true, "workplace_type": "remote"},
+      "baseline": {"accepted": false, "location_status": "unknown"},
+      "target": {"accepted": false}
+    },
+    {
+      "id": "qa-restricted",
+      "profile": "qa",
+      "job": {"title": "Senior QA Engineer", "location": "Europe", "description": "Remote across Europe. Candidates must reside in Germany.", "remote": true, "workplace_type": "remote"},
+      "baseline": {"accepted": false, "location_status": "blocked"},
+      "target": {"accepted": false}
+    },
+    {
+      "id": "developer-senior",
+      "profile": "developer",
+      "job": {"title": "Senior Backend Engineer", "location": "Europe", "description": "Develop backend services with Python.", "remote": true, "workplace_type": "remote"},
+      "baseline": {"accepted": true, "location_status": "allowed"},
+      "target": {"accepted": true}
+    },
+    {
+      "id": "developer-junior",
+      "profile": "developer",
+      "job": {"title": "Junior Backend Engineer", "location": "Europe", "description": "Develop backend services with Python.", "remote": true, "workplace_type": "remote"},
+      "baseline": {"accepted": false, "location_status": "unknown"},
+      "target": {"accepted": true}
+    },
+    {
+      "id": "developer-qa-fallback",
+      "profile": "developer",
+      "job": {"title": "Senior QA Engineer", "location": "Europe", "description": "Manual testing for software products.", "remote": true, "workplace_type": "remote"},
+      "baseline": {"accepted": true, "location_status": "allowed"},
+      "target": {"accepted": false}
+    },
+    {
+      "id": "designer-remote",
+      "profile": "designer",
+      "job": {"title": "Senior Product Designer", "location": "Europe", "description": "Design accessible products in Figma.", "remote": true, "workplace_type": "remote"},
+      "baseline": {"accepted": true, "location_status": "allowed"},
+      "target": {"accepted": true}
+    },
+    {
+      "id": "designer-hybrid",
+      "profile": "designer",
+      "job": {"title": "Product Designer", "location": "Berlin, Germany", "description": "Hybrid role designing accessible products in Figma.", "remote": false, "workplace_type": "hybrid"},
+      "baseline": {"accepted": false, "location_status": "not_remote"},
+      "target": {"accepted": true}
+    },
+    {
+      "id": "designer-onsite",
+      "profile": "designer",
+      "job": {"title": "Product Designer", "location": "Berlin, Germany", "description": "Design accessible products in Figma from our Berlin office.", "remote": false, "workplace_type": "on-site"},
+      "baseline": {"accepted": true, "location_status": "allowed"},
+      "target": {"accepted": true}
+    }
+  ]
+}
