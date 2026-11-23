@@ -9,23 +9,43 @@
     },
     "api": {
       "image": "job-searcher-runtime:aws",
-      "pull_policy": "never"
+      "pull_policy": "never",
+      "healthcheck": {
+        "timeout": "30s",
+        "interval": "60s"
+      }
     },
     "scheduler": {
       "image": "job-searcher-runtime:aws",
-      "pull_policy": "never"
+      "pull_policy": "never",
+      "healthcheck": {
+        "timeout": "30s",
+        "interval": "60s"
+      }
     },
     "search-worker": {
       "image": "job-searcher-runtime:aws",
-      "pull_policy": "never"
+      "pull_policy": "never",
+      "healthcheck": {
+        "timeout": "30s",
+        "interval": "60s"
+      }
     },
     "chat-worker": {
       "image": "job-searcher-runtime:aws",
-      "pull_policy": "never"
+      "pull_policy": "never",
+      "healthcheck": {
+        "timeout": "30s",
+        "interval": "60s"
+      }
     },
     "document-worker": {
       "image": "job-searcher-runtime:aws",
-      "pull_policy": "never"
+      "pull_policy": "never",
+      "healthcheck": {
+        "timeout": "30s",
+        "interval": "60s"
+      }
     },
     "maintenance": {
       "image": "job-searcher-runtime:aws",

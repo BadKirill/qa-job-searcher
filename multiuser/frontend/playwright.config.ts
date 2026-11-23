@@ -7,7 +7,7 @@ export default defineConfig({
   retries: 0,
   timeout: 60000,
   expect: { timeout: 15000 },
-  reporter: [["list"], ["html", { open: "never" }]],
+  reporter: [["list"], ["html", { open: "never" }], ["json", { outputFile: "test-results/results.json" }]],
   projects: [
     {
       name: "cutover",

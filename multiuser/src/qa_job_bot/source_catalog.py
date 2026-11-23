@@ -1,6 +1,5 @@
-import xml.etree.ElementTree as ET
-
 import httpx
+from defusedxml import ElementTree as ET
 
 from qa_job_bot.config import Board
 from qa_job_bot.search_models import AGGREGATORS, KINDS, SourceSpec

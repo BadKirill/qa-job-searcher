@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
-exec 9>/run/qa-job-searcher-backup.lock
-flock -n 9
+if [[ "${QA_BACKUP_LOCK_HELD:-0}" != 1 ]]; then
+    exec 9>/run/qa-job-searcher-backup.lock
+    flock -n 9
+fi
 cd /srv/qa-job-searcher
 bucket=$(cat .runtime/backup-bucket)
 name="daily-$(date -u +%Y%m%dT%H%M%SZ)"

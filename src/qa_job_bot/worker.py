@@ -86,7 +86,8 @@ class Worker:
                     await self.document(task)
         except AgentUnavailable:
             self.transition(
-                task, "failed",
+                task,
+                "failed",
                 error="OpenAI API недоступен. Проверьте API-ключ, баланс и лимит проекта.",
             )
         except (PolicyViolation, DocumentFileError) as error:

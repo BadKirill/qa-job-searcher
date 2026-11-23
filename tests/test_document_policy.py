@@ -234,9 +234,9 @@ def test_visual_review_binds_both_files_and_document():
         == result
     )
     revised = result | {"verdict": "revise", "issues": ["Increase title spacing"]}
-    assert bind_visual_review(
-        revised, document, {"sha256": "a" * 64}, {"sha256": "b" * 64}
-    ) == revised
+    assert (
+        bind_visual_review(revised, document, {"sha256": "a" * 64}, {"sha256": "b" * 64}) == revised
+    )
 
 
 @pytest.mark.parametrize(

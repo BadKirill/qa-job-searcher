@@ -1,5 +1,9 @@
 # Перенос БД и backend в AWS
 
+23 ноября 2026 текущий production URL изменён на **https://getcareer.app**.
+[Домен, HTTPS и закрытый API](domain-deployment.md), [CI/CD](cicd.md).
+Ниже сохранена история первоначального переноса 21 ноября с адресом ngrok.
+
 21 ноября 2026. Рабочая многопользовательская установка перенесена с Mac в
 AWS eu-north-1. Публичный адрес сохранён:
 https://baboon-arriving-visually.ngrok-free.app.

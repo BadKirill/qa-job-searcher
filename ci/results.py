@@ -1,0 +1,111 @@
+import argparse
+import hashlib
+import json
+import re
+from datetime import date
+from pathlib import Path
+
+from defusedxml import ElementTree as ET
+
+REVIEWED_BANDIT = Path(__file__).with_name("bandit-reviewed.json")
+
+
+def verify_pytest(path):
+    suites = ET.parse(path).getroot().iter("testsuite")
+    counts = {key: 0 for key in ("tests", "failures", "errors", "skipped")}
+    for suite in suites:
+        for key in counts:
+            counts[key] += int(suite.get(key, "0"))
+    if counts["tests"] < 1 or any(counts[key] for key in ("failures", "errors", "skipped")):
+        raise ValueError(f"All backend tests must pass without skips: {counts}")
+    return counts
+
+
+def verify_playwright(path):
+    stats = json.loads(Path(path).read_text())["stats"]
+    if stats["expected"] < 1 or any(stats[key] for key in ("unexpected", "flaky", "skipped")):
+        raise ValueError(f"All browser tests must pass without retries or skips: {stats}")
+    return stats
+
+
+def verify_vitest(path):
+    stats = json.loads(Path(path).read_text())
+    if stats["numPassedTests"] < 1 or any(
+        stats.get(key, 0) for key in ("numFailedTests", "numPendingTests", "numTodoTests")
+    ):
+        raise ValueError("All component tests must pass without skips")
+    return {
+        key: stats.get(key, 0) for key in ("numPassedTests", "numFailedTests", "numPendingTests")
+    }
+
+
+def verify_sarif(directory):
+    files = list(Path(directory).glob("*.sarif"))
+    if not files:
+        raise ValueError("CodeQL reports missing")
+    findings = []
+    for path in files:
+        for run in json.loads(path.read_text())["runs"]:
+            rules = {rule["id"]: rule for rule in run["tool"]["driver"].get("rules", [])}
+            for finding in run.get("results", []):
+                severity = float(
+                    rules.get(finding.get("ruleId"), {})
+                    .get("properties", {})
+                    .get("security-severity", 0)
+                )
+                if severity >= 7:
+                    findings.append(finding["ruleId"])
+    if findings:
+        raise ValueError(f"High/critical CodeQL findings: {findings}")
+    return {"reports": len(files), "high_or_critical": 0}
+
+
+def verify_bandit(path, reviewed_path=REVIEWED_BANDIT):
+    reviews = json.loads(Path(reviewed_path).read_text())
+    unreviewed = []
+    for item in json.loads(Path(path).read_text())["results"]:
+        code = re.sub(r"^\d+\s", "", item["code"], flags=re.MULTILINE)
+        digest = hashlib.sha256(code.encode()).hexdigest()
+        allowed = any(
+            review["test_id"] == item["test_id"]
+            and review["filename"] == item["filename"]
+            and review["code_sha256"] == digest
+            and date.fromisoformat(review["expires"]) >= date.today()
+            for review in reviews
+        )
+        if not allowed:
+            unreviewed.append(item["filename"] + ":" + item["test_id"])
+    if unreviewed:
+        raise ValueError(f"Unreviewed high-confidence Bandit findings: {unreviewed}")
+    return {"reviewed_findings": len(reviews), "unreviewed_findings": 0}
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("directory", type=Path, nargs="?")
+    parser.add_argument("--sarif", type=Path)
+    parser.add_argument("--bandit", type=Path)
+    args = parser.parse_args()
+    if args.sarif:
+        print(json.dumps(verify_sarif(args.sarif)))
+        return
+    if args.bandit:
+        print(json.dumps(verify_bandit(args.bandit)))
+        return
+    if args.directory is None:
+        parser.error("directory or --sarif is required")
+    print(
+        json.dumps(
+            {
+                "backend": verify_pytest(args.directory / "test-results/backend.xml"),
+                "component": verify_vitest(
+                    args.directory / "frontend/coverage/vitest-results.json"
+                ),
+                "browser": verify_playwright(args.directory / "frontend/test-results/results.json"),
+            }
+        )
+    )
+
+
+if __name__ == "__main__":
+    main()

@@ -6,11 +6,11 @@ apt-get update
 apt-get upgrade -y
 apt-get install -y ca-certificates curl gnupg unzip docker.io docker-compose-v2 unattended-upgrades
 install -d -m 0755 /etc/apt/keyrings
-curl -fsSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc -o /etc/apt/keyrings/ngrok.asc
-chmod 0644 /etc/apt/keyrings/ngrok.asc
-printf '%s\n' 'deb [signed-by=/etc/apt/keyrings/ngrok.asc] https://ngrok-agent.s3.amazonaws.com bookworm main' > /etc/apt/sources.list.d/ngrok.list
+curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt -o /etc/apt/sources.list.d/caddy-stable.list
+chmod a+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg /etc/apt/sources.list.d/caddy-stable.list
 apt-get update
-apt-get install -y ngrok
+apt-get install -y caddy
 curl -fsSL https://awscli.amazonaws.com/v2/install.sh -o /tmp/qa-aws-install.sh
 bash /tmp/qa-aws-install.sh --system --quiet
 install -d -m 0700 /srv/qa-job-searcher /srv/qa-job-searcher/.runtime /var/lib/qa-job-searcher
@@ -39,5 +39,5 @@ fi
 systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service
 docker compose version
 aws --version
-ngrok version
+caddy version
 touch /var/lib/qa-job-searcher/bootstrap-ready

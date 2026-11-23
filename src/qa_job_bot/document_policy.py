@@ -128,7 +128,8 @@ def validate_draft(draft: dict, context: dict) -> dict:
     identity = [fact["text"] for fact in facts if fact.get("kind") == "title"]
     title_words = result["title"].casefold().split()
     if identity and any(
-        title_words and title_words[0] == value.casefold().split()[0]
+        title_words
+        and title_words[0] == value.casefold().split()[0]
         and " ".join(title_words) != " ".join(value.casefold().split())
         for value in identity
     ):

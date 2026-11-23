@@ -10,6 +10,8 @@ from pathlib import Path, PurePosixPath
 from xml.etree import ElementTree
 from xml.sax.saxutils import escape
 
+from defusedxml.common import DefusedXmlException
+from defusedxml.ElementTree import fromstring
 from docx import Document
 from docx.enum.style import WD_STYLE_TYPE
 from docx.shared import Pt
@@ -48,7 +50,10 @@ class DocumentFileError(ValueError):
 def _xml(payload: bytes) -> ElementTree.Element:
     if b"<!DOCTYPE" in payload or b"<!ENTITY" in payload:
         raise DocumentFileError("XML entities are not permitted")
-    return ElementTree.fromstring(payload)
+    try:
+        return fromstring(payload)
+    except DefusedXmlException as error:
+        raise DocumentFileError("XML entities are not permitted") from error
 
 
 def _docx(content: bytes) -> tuple[str, dict]:

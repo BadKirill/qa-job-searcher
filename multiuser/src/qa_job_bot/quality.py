@@ -34,6 +34,7 @@ def main() -> None:
                 "--cov-report=json:coverage.json",
                 "--cov-report=xml:coverage.xml",
                 "--cov-report=term-missing",
+                "--junitxml=test-results/backend.xml",
             ],
             root,
         ),

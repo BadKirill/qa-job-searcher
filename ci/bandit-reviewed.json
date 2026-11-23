@@ -1,0 +1,9 @@
+[
+  {
+    "test_id": "B310",
+    "filename": "multiuser/src/qa_job_bot/operations.py",
+    "code_sha256": "59ba91068aca84b92ba80ac501908ac08f9e957b3045f96f28ffd8cd0f7667cc",
+    "expires": "2027-02-01",
+    "reason": "Operator-controlled health URL only. No user input, credentials or response content are exposed. Fixed runtime URL is loopback HTTP and readiness requires HTTP 200."
+  }
+]

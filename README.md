@@ -1,5 +1,8 @@
 # QA Job Searcher
 
+Production: **https://getcareer.app**. Прямой `api.getcareer.app` закрыт; приложение
+использует same-origin `/api`. [CI/CD](docs/cicd.md), [DNS/HTTPS и доступ](docs/domain-deployment.md).
+
 Актуальные исходники многопользовательской платформы, включая новую палитру и
 исправления отступов, находятся в [multiuser/](multiuser/).
 [Структура исходников и проверки двух версий](docs/source-layout.md).
