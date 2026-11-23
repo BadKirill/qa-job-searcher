@@ -84,8 +84,22 @@ Compose override. Старый ручной workflow Deploy VPS удалён: о
 
 ## Фактическое состояние
 
-Локальные проверки новых CI helpers: 48 passed, покрытие строк и ветвлений >90%.
+Оба полных локальных quality gate завершились кодом 0 без failed, skipped,
+todo и flaky; Playwright retries = 0.
+
+| Набор | Backend | Component | Browser E2E | Backend строки / ветвления | Frontend строки / ветвления |
+| --- | --- | --- | --- | --- | --- |
+| Платформа multiuser | 1409 | 169 | 25 | 98,37% / 95,62% | 99,55% / 95,64% |
+| Сохранённая SQLite-версия | 820 | 66 | 8 | 99,65% / 98,44% | 99,34% / 95,94% |
+
+CI helpers: 48 passed, 267/272 строк (98,16%), 75/80 ветвлений (93,75%).
 Actionlint, Ruff и ESLint прошли. После обновлений npm audit и pip-audit не находят
-известных уязвимостей в проверенных dependency-наборах. Полный финальный CI и первый
-автоматический CD должны быть подтверждены ссылками на реальные завершённые runs;
-наличие YAML само по себе не означает готовый рабочий CI/CD.
+известных уязвимостей в трёх проверенных наборах каждой экосистемы. Gitleaks не нашёл
+секретов в проверенной Git-истории. CodeQL Python/JS/Actions и Trivy IaC прошли на GitHub.
+
+Финальный CI, ARM64 image scan и первая автоматическая доставка требуют успешных
+завершённых runs. Актуальные результаты публикуются в [Actions](https://github.com/BadKirill/qa-job-searcher/actions/workflows/ci.yml)
+и [production deployments](https://github.com/BadKirill/qa-job-searcher/deployments).
+Наличие YAML само по себе не означает рабочий CI/CD. Контролируемые внешние ответы
+в regression gate не доказывают доступность живого OpenAI API/MCP; production
+credentials и личные документы не передаются в GitHub Actions.

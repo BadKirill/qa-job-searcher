@@ -224,7 +224,7 @@
     "SecurityGroup": {
       "Type": "AWS::EC2::SecurityGroup",
       "Properties": {
-        "GroupDescription": "QA Job Searcher: Cloudflare ingress managed separately; outbound HTTP and TLS",
+        "GroupDescription": "QA Job Searcher: no inbound access; SSM and ngrok use outbound TLS",
         "VpcId": {
           "Ref": "VpcId"
         },
