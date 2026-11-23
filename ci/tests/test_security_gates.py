@@ -100,3 +100,58 @@ def test_sarif_extension_metadata_blocks_high_security_results(tmp_path, referen
     (tmp_path / "python.sarif").write_text(json.dumps(report))
     with pytest.raises(ValueError, match="no rule metadata"):
         results.verify_sarif(tmp_path)
+
+
+@pytest.mark.parametrize("defect", [None, "expired", "code", "configuration", "location"])
+def test_codeql_review_is_exact_and_expires(tmp_path, defect):
+
+    reviews = json.loads(results.REVIEWED_CODEQL.read_text())
+    review = reviews[0]
+    finding = {
+        "locations": [
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": review["filename"]},
+                    "region": {"startLine": review["line"]},
+                }
+            }
+        ]
+    }
+    assert results.reviewed_codeql(finding, review["rule_id"], reviews)
+    assert not results.reviewed_codeql({}, review["rule_id"], reviews)
+    if defect == "expired":
+        review["expires"] = "2020-01-01"
+    if defect in {"code", "configuration"}:
+        name = "ci/deploy.py" if defect == "code" else "infra/aws/Caddyfile"
+        review["files"][name] = "0" * 64
+    if defect == "location":
+        finding["locations"][0]["physicalLocation"]["region"]["startLine"] += 1
+    path = tmp_path / "reviewed.sarif"
+    path.write_text(
+        json.dumps(
+            {
+                "runs": [
+                    {
+                        "tool": {
+                            "driver": {
+                                "rules": [
+                                    {
+                                        "id": review["rule_id"],
+                                        "properties": {"security-severity": "7.8"},
+                                    }
+                                ]
+                            }
+                        },
+                        "results": [{**finding, "ruleId": review["rule_id"]}],
+                    }
+                ]
+            }
+        )
+    )
+    review_path = tmp_path / "reviews.json"
+    review_path.write_text(json.dumps(reviews))
+    if defect:
+        with pytest.raises(ValueError, match="High/critical"):
+            results.verify_sarif(tmp_path, review_path)
+    else:
+        assert results.verify_sarif(tmp_path, review_path)["high_or_critical"] == 0

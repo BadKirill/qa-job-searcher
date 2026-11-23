@@ -6,6 +6,7 @@ from datetime import date
 from pathlib import Path
 
 REVIEWED_BANDIT = Path(__file__).with_name("bandit-reviewed.json")
+REVIEWED_CODEQL = Path(__file__).with_name("codeql-reviewed.json")
 
 
 def verify_pytest(path):
@@ -39,7 +40,26 @@ def verify_vitest(path):
     }
 
 
-def verify_sarif(directory):
+def reviewed_codeql(finding, rule_id, reviews):
+    locations = finding.get("locations", [])
+    if len(locations) != 1:
+        return False
+    location = locations[0]["physicalLocation"]
+    return any(
+        review["rule_id"] == rule_id
+        and review["filename"] == location["artifactLocation"]["uri"]
+        and review["line"] == location["region"]["startLine"]
+        and date.fromisoformat(review["expires"]) >= date.today()
+        and all(
+            hashlib.sha256(Path(name).read_bytes()).hexdigest() == digest
+            for name, digest in review["files"].items()
+        )
+        for review in reviews
+    )
+
+
+def verify_sarif(directory, reviewed_path=REVIEWED_CODEQL):
+    reviews = json.loads(Path(reviewed_path).read_text())
     files = list(Path(directory).rglob("*.sarif"))
     if not files:
         raise ValueError("CodeQL reports missing")
@@ -56,7 +76,7 @@ def verify_sarif(directory):
                 if rule_id not in rules:
                     raise ValueError("CodeQL result has no rule metadata: " + rule_id)
                 severity = float(rules[rule_id].get("properties", {}).get("security-severity", 0))
-                if severity >= 7:
+                if severity >= 7 and not reviewed_codeql(finding, rule_id, reviews):
                     findings.append(rule_id)
     if findings:
         raise ValueError(f"High/critical CodeQL findings: {findings}")
