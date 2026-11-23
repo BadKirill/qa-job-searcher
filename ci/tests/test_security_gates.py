@@ -76,3 +76,27 @@ def test_public_matrix_includes_private_api_and_admin_routes(monkeypatch):
     assert ("getcareer.app", "/api/admin/users", 401) in calls
     assert ("getcareer.app", "/api/setup", 404) in calls
     assert ("getcareer.app", "/api/session", 200) in calls
+
+
+@pytest.mark.parametrize("reference", [{"ruleId": "unsafe"}, {"rule": {"id": "unsafe"}}])
+def test_sarif_extension_metadata_blocks_high_security_results(tmp_path, reference):
+    report = {
+        "runs": [
+            {
+                "tool": {
+                    "driver": {},
+                    "extensions": [
+                        {"rules": [{"id": "unsafe", "properties": {"security-severity": "7.5"}}]}
+                    ],
+                },
+                "results": [reference],
+            }
+        ]
+    }
+    (tmp_path / "python.sarif").write_text(json.dumps(report))
+    with pytest.raises(ValueError, match="High/critical"):
+        results.verify_sarif(tmp_path)
+    report["runs"][0]["tool"]["extensions"] = []
+    (tmp_path / "python.sarif").write_text(json.dumps(report))
+    with pytest.raises(ValueError, match="no rule metadata"):
+        results.verify_sarif(tmp_path)

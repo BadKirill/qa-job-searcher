@@ -44,6 +44,8 @@ class MaintenanceMode(Exception):
 def stage_task_directory(
     settings: WebSettings, task_id: str, user_id=None
 ) -> tuple[Path, Path] | None:
+    if not task_id or task_id in {".", ".."} or Path(task_id).name != task_id or "\\" in task_id:
+        raise StoreError("Каталог документа небезопасен для удаления.", 409)
     root = owner_root(settings, user_id) / "artifacts"
     if user_id is not None and not (root / task_id).exists() and not (root / task_id).is_symlink():
         root = settings.data_dir.absolute() / "artifacts"
@@ -464,8 +466,8 @@ def create_app(
 
     @app.delete("/api/tasks/{task_id}", status_code=204)
     def delete_task(task_id: str, store: ScopedStore):
-        store.document_task_for_deletion(task_id)
-        staged = stage_task_directory(settings, task_id, getattr(store, "user_id", None))
+        task = store.document_task_for_deletion(task_id)
+        staged = stage_task_directory(settings, task["id"], getattr(store, "user_id", None))
         if staged:
             try:
                 shutil.rmtree(staged[1])

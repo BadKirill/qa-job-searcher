@@ -182,8 +182,13 @@ def ready():
 
 def replace(source, destination):
     temporary = destination.with_suffix(destination.suffix + ".deploying")
-    shutil.copyfile(source, temporary)
-    os.chmod(temporary, 0o644 if destination == CADDY else 0o600)
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "wb") as output, source.open("rb") as content:
+        shutil.copyfileobj(content, output)
+    os.chmod(temporary, 0o600)
+    if destination == CADDY:
+        run(["chown", "root:caddy", str(temporary)])
+        os.chmod(temporary, 0o640)
     os.replace(temporary, destination)
 
 

@@ -201,3 +201,17 @@ def test_internal_readiness_uses_exact_allowed_host(runtime, monkeypatch, status
             deploy.ready()
     assert calls[0][1]["headers"] == {"Host": "getcareer.app"}
     assert calls[-1] == "closed"
+
+
+def test_configuration_replacement_limits_read_access(runtime, monkeypatch):
+    source = runtime / "candidate"
+    source.write_text("verified configuration")
+    calls = []
+    monkeypatch.setattr(deploy, "run", lambda command: calls.append(command))
+    deploy.replace(source, deploy.CADDY)
+    assert deploy.CADDY.read_text() == "verified configuration"
+    assert deploy.CADDY.stat().st_mode & 0o777 == 0o640
+    assert calls == [["chown", "root:caddy", str(deploy.CADDY.with_suffix(".deploying"))]]
+    destination = runtime / "compose.aws.json"
+    deploy.replace(source, destination)
+    assert destination.stat().st_mode & 0o777 == 0o600

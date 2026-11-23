@@ -46,15 +46,18 @@ def verify_sarif(directory):
     findings = []
     for path in files:
         for run in json.loads(path.read_text())["runs"]:
-            rules = {rule["id"]: rule for rule in run["tool"]["driver"].get("rules", [])}
+            rules = {
+                rule["id"]: rule
+                for component in [run["tool"]["driver"], *run["tool"].get("extensions", [])]
+                for rule in component.get("rules", [])
+            }
             for finding in run.get("results", []):
-                severity = float(
-                    rules.get(finding.get("ruleId"), {})
-                    .get("properties", {})
-                    .get("security-severity", 0)
-                )
+                rule_id = finding.get("ruleId") or finding["rule"]["id"]
+                if rule_id not in rules:
+                    raise ValueError("CodeQL result has no rule metadata: " + rule_id)
+                severity = float(rules[rule_id].get("properties", {}).get("security-severity", 0))
                 if severity >= 7:
-                    findings.append(finding["ruleId"])
+                    findings.append(rule_id)
     if findings:
         raise ValueError(f"High/critical CodeQL findings: {findings}")
     return {"reports": len(files), "high_or_critical": 0}
