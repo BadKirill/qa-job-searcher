@@ -10,6 +10,11 @@ import subprocess
 import urllib.parse
 from pathlib import Path
 
+if __package__:
+    from .image_identity import fingerprint
+else:
+    from image_identity import fingerprint
+
 ROOT = Path("/srv/qa-job-searcher")
 BUCKET = "qa-job-searcher-577331852274-eu-north-1"
 REGION = "eu-north-1"
@@ -77,10 +82,11 @@ def prepare(commit, expected):
     if file_hash(directory / "release.json") != expected:
         raise ValueError("Release manifest checksum mismatch")
     manifest = json.loads((directory / "release.json").read_text())
-    if manifest["version"] != 1 or manifest["commit"] != commit or set(manifest["files"]) != FILES:
+    if manifest["version"] != 2 or manifest["commit"] != commit or set(manifest["files"]) != FILES:
         raise ValueError("Release manifest scope mismatch")
     if not re.fullmatch("sha256:[0-9a-f]{64}", manifest["image_id"]):
         raise ValueError("Invalid image ID")
+    validate_identifier(manifest["image_fingerprint"], 64)
     for name, expected_hash in manifest["files"].items():
         validate_identifier(expected_hash, 64)
         download(commit, name, directory)
@@ -92,7 +98,7 @@ def prepare(commit, expected):
             ["docker", "image", "inspect", "job-searcher-runtime:" + commit], capture_output=True
         ).stdout
     )[0]
-    if image["Id"] != manifest["image_id"] or image["Architecture"] != "arm64":
+    if fingerprint(image) != manifest["image_fingerprint"] or image["Architecture"] != "arm64":
         raise ValueError("Loaded image identity or architecture mismatch")
     if image["Config"].get("Labels", {}).get("org.opencontainers.image.revision") != commit:
         raise ValueError("Image source revision mismatch")
