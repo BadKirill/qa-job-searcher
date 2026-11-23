@@ -59,7 +59,11 @@ Production запускается только из `master` и после `CI g
 задания не получают AWS-ключей, OpenAI-ключей, рабочих БД или исходных CV.
 
 OIDC role `qa-job-searcher-github-deploy` доверяет только environment production
-репозитория BadKirill/qa-job-searcher. GitHub environment разрешает только master.
+репозитория BadKirill/qa-job-searcher. Точный subject:
+`repo:BadKirill@158462832/qa-job-searcher@1404647213:environment:production`.
+Он сверён с GitHub OIDC customization API (`use_immutable_subject=true`), включает
+неизменяемые ID владельца и репозитория; старый формат без ID не разрешён.
+GitHub environment разрешает только master и запрещает admin bypass.
 Роль может записывать только `artifacts/releases/*` в приватный S3 и запускать
 только `qa-job-searcher-deploy` на `i-030fa1abecd9da0ac`; IAM, произвольный shell,
 чтение backups и пользовательских credentials ей не предоставлены.
@@ -68,6 +72,12 @@ OIDC role `qa-job-searcher-github-deploy` доверяет только environm
 
 Установленный root helper проверяет SHA-256 manifest и каждого payload, source
 revision label, ARM64 и конфигурацию Caddy, затем берёт общий lock с backup.
+Manifest v2 связывает SHA-256 всего архива с переносимым fingerprint: все
+упорядоченные rootfs layer digests, архитектура/OS и параметры выполнения образа
+(User, Env, Cmd, Entrypoint, WorkingDir, ports, volumes, labels, signal, shell,
+healthcheck, OnBuild). Пустые Docker/OCI defaults нормализуются; opaque Docker ID
+сохраняется для аудита, но может измениться при import между движками.
+Изменение слоя, команды, окружения или пользователя блокирует доставку.
 Перед изменением выполняется согласованная offsite-копия. Приложение закрывает
 запись, задания завершаются, писатели останавливаются; заменяются конфигурация и
 image, проходят миграции и реальные healthchecks. Maintenance выключается перед
@@ -94,8 +104,8 @@ todo и flaky; Playwright retries = 0.
 | Платформа multiuser | 1416 | 169 | 25 | 98,37% / 95,62% | 99,55% / 95,64% |
 | Сохранённая SQLite-версия | 820 | 66 | 8 | 99,65% / 98,44% | 99,34% / 95,94% |
 
-CI helpers после проверки SARIF extensions: 58 passed, 286/291 строк (98,28%),
-81/86 ветвлений (94,19%).
+CI helpers после проверки SARIF extensions: 82 passed, 306/311 строк (98,39%),
+89/94 ветвлений (94,68%).
 Actionlint, Ruff и ESLint прошли. После обновлений npm audit и pip-audit не находят
 известных уязвимостей в трёх проверенных наборах каждой экосистемы. Gitleaks не нашёл
 секретов в проверенной Git-истории. Trivy IaC прошёл на GitHub. Проверка SARIF учитывает rules из driver и extensions,
@@ -127,3 +137,25 @@ client и DejaVu сохранены; стандартный путь шрифт�
 Наличие YAML само по себе не означает рабочий CI/CD. Контролируемые внешние ответы
 в regression gate не доказывают доступность живого OpenAI API/MCP; production
 credentials и личные документы не передаются в GitHub Actions.
+
+## Первый запуск OIDC
+
+В первой попытке master run [45100483824](https://github.com/BadKirill/qa-job-searcher/actions/runs/45100483824)
+все quality/security/image gates прошли, CD остановился до передачи артефакта:
+AWS trust policy использовала прежний subject без immutable ID.
+GitHub для этого репозитория выдаёт новый формат, подтверждённый API и
+[OIDC reference](https://docs.github.com/en/actions/reference/security/oidc).
+Trust исправлена на точный immutable subject без расширения разрешений.
+Сбой первой попытки остаётся в истории reliability, даже если повторная доставка
+успешна; текущая малая выборка не удовлетворяет цели 99%. Это не пропуск тестов.
+
+Первый доставленный архив также выявил несовместимость opaque image ID: Docker
+на GitHub и EC2 сохранил одинаковые слои и runtime-конфигурацию с разными ID.
+Guard остановил prepare до backup/переключения. Для v2 переносимый fingerprint
+проверен на реальном остановленном кандидате EC2 и исходном archive config.
+Контроль SHA-256 payload и label commit сохранён. Прежние manifests v1 отвергаются.
+
+Исправленная CloudFormation-конфигурация прошла cfn-lint 1.61.0 и Trivy.
+cfn-guard 3.3.0 с IAM rules registry commit
+`7f7340c26ae5d5e8874651dbffeb12e0e9f505b6`: 6 applicable PASS, 2 not applicable,
+0 violations. Это отдельная проверка правил IAM, не аттестация всех сервисов AWS.
