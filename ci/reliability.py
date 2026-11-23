@@ -32,7 +32,10 @@ def main():
         "## CI first-attempt reliability\n\n"
         + json.dumps(result, indent=2)
         + "\n\nLast 100 completed production-branch CI runs. Reruns count as failures. "
-        "A small sample does not establish future reliability.\n"
+        "A small sample does not establish future reliability.\n\n"
+        "This is a historical CI target, not a production availability check. "
+        "Past failures remain in the window after fixes and successful deployments. "
+        "Inspect the latest CI run and production checks separately.\n"
     )
     if result["success_percent"] is not None and result["success_percent"] < 99:
         raise SystemExit("CI reliability below 99%; investigate first-attempt failures")

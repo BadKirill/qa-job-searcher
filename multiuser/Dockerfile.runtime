@@ -12,7 +12,7 @@ WORKDIR /app
 RUN --mount=type=secret,id=system_ca sh -c 'if [ -f /run/secrets/system_ca ]; then export SSL_CERT_FILE=/run/secrets/system_ca; export CURL_CA_BUNDLE=/run/secrets/system_ca; fi; apk upgrade --no-cache && apk add --no-cache postgresql17-client font-dejavu libstdc++'
 RUN mkdir -p /usr/share/fonts/truetype && ln -s /usr/share/fonts/dejavu /usr/share/fonts/truetype/dejavu
 COPY requirements.lock ./
-RUN --mount=type=secret,id=system_ca sh -c 'if [ -f /run/secrets/system_ca ]; then export PIP_CERT=/run/secrets/system_ca; fi; pip install --no-cache-dir -r requirements.lock'
+RUN --mount=type=secret,id=system_ca sh -c 'if [ -f /run/secrets/system_ca ]; then export PIP_CERT=/run/secrets/system_ca; fi; pip install --timeout 60 --retries 5 --no-cache-dir -r requirements.lock'
 COPY pyproject.toml README.md ./
 COPY src ./src
 RUN --mount=type=secret,id=system_ca sh -c 'if [ -f /run/secrets/system_ca ]; then export PIP_CERT=/run/secrets/system_ca; fi; pip install --no-cache-dir --no-deps .'
