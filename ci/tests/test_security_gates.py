@@ -1,10 +1,23 @@
 import hashlib
 import json
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
 
 from ci import results, verify_public
+
+
+def test_sarif_gate_runs_without_installed_application_dependencies(tmp_path):
+    (tmp_path / "actions.sarif").write_text('{"runs": [{"tool": {"driver": {}}}]}')
+    completed = subprocess.run(
+        [sys.executable, "-S", results.__file__, "--sarif", str(tmp_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert json.loads(completed.stdout) == {"reports": 1, "high_or_critical": 0}
 
 
 @pytest.mark.parametrize("defect", [None, "test_id", "filename", "code_sha256", "expires"])

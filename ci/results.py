@@ -5,12 +5,12 @@ import re
 from datetime import date
 from pathlib import Path
 
-from defusedxml import ElementTree as ET
-
 REVIEWED_BANDIT = Path(__file__).with_name("bandit-reviewed.json")
 
 
 def verify_pytest(path):
+    from defusedxml import ElementTree as ET
+
     suites = ET.parse(path).getroot().iter("testsuite")
     counts = {key: 0 for key in ("tests", "failures", "errors", "skipped")}
     for suite in suites:
@@ -40,7 +40,7 @@ def verify_vitest(path):
 
 
 def verify_sarif(directory):
-    files = list(Path(directory).glob("*.sarif"))
+    files = list(Path(directory).rglob("*.sarif"))
     if not files:
         raise ValueError("CodeQL reports missing")
     findings = []
