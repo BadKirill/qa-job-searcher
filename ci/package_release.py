@@ -5,6 +5,11 @@ import shutil
 import subprocess
 from pathlib import Path
 
+if __package__:
+    from .image_identity import fingerprint
+else:
+    from image_identity import fingerprint
+
 
 def digest(path):
     with path.open("rb") as stream:
@@ -14,9 +19,12 @@ def digest(path):
 def package(source, destination, commit):
     destination.mkdir(parents=True, exist_ok=True)
     tag = "job-searcher-runtime:" + commit
-    image_id = subprocess.check_output(
-        ["docker", "image", "inspect", tag, "--format", "{{.Id}}"], text=True
-    ).strip()
+    image = json.loads(subprocess.check_output(["docker", "image", "inspect", tag], text=True))[0]
+    if (
+        image["Architecture"] != "arm64"
+        or image["Config"]["Labels"].get("org.opencontainers.image.revision") != commit
+    ):
+        raise ValueError("Release image architecture or revision mismatch")
     shutil.copyfile(source / "multiuser/compose.runtime.yaml", destination / "compose.runtime.yaml")
     shutil.copyfile(source / "infra/aws/Caddyfile", destination / "Caddyfile")
     override = json.loads((source / "infra/aws/compose.override.json").read_text())
@@ -25,9 +33,10 @@ def package(source, destination, commit):
             service["image"] = tag
     (destination / "compose.aws.json").write_text(json.dumps(override, indent=2) + "\n")
     manifest = {
-        "version": 1,
+        "version": 2,
         "commit": commit,
-        "image_id": image_id,
+        "image_id": image["Id"],
+        "image_fingerprint": fingerprint(image),
         "files": {
             name: digest(destination / name)
             for name in (

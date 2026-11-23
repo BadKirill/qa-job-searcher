@@ -41,20 +41,31 @@ def test_release_identifiers_reject_shell_and_path_input(value, length):
         "file_hash",
         "architecture",
         "revision",
-        "loaded_id",
+        "loaded_config",
+        "old_manifest",
     ],
 )
 def test_prepare_checks_hashes_scope_architecture_and_source(runtime, monkeypatch, defect):
+    image = {
+        "Id": "sha256:" + "b" * 64,
+        "Architecture": "arm64",
+        "Os": "linux",
+        "RootFS": {"Layers": ["sha256:" + "e" * 64]},
+        "Config": {"Labels": {"org.opencontainers.image.revision": COMMIT}},
+    }
     contents = {name: name.encode() for name in deploy.FILES}
     manifest = {
-        "version": 1,
+        "version": 2,
         "commit": COMMIT,
-        "image_id": "sha256:" + "b" * 64,
+        "image_id": image["Id"],
+        "image_fingerprint": deploy.fingerprint(image),
         "files": {
             name: __import__("hashlib").sha256(value).hexdigest()
             for name, value in contents.items()
         },
     }
+    if defect == "old_manifest":
+        manifest["version"] = 1
     if defect == "scope":
         manifest["commit"] = "c" * 40
     if defect == "image_id":
@@ -70,17 +81,17 @@ def test_prepare_checks_hashes_scope_architecture_and_source(runtime, monkeypatc
         (directory / name).write_bytes(contents[name])
 
     monkeypatch.setattr(deploy, "download", download)
-    image = {
-        "Id": manifest["image_id"],
-        "Architecture": "arm64",
-        "Config": {"Labels": {"org.opencontainers.image.revision": COMMIT}},
-    }
     if defect == "architecture":
         image["Architecture"] = "amd64"
     if defect == "revision":
         image["Config"]["Labels"] = {}
-    if defect == "loaded_id":
-        image["Id"] = "sha256:" + "d" * 64
+    image["Id"] = "sha256:" + "d" * 64
+    if defect == "loaded_config":
+        image["Config"]["User"] = "0"
+    if defect in {"architecture", "revision"}:
+        manifest["image_fingerprint"] = deploy.fingerprint(image)
+        contents["release.json"] = json.dumps(manifest).encode()
+        expected = __import__("hashlib").sha256(contents["release.json"]).hexdigest()
     monkeypatch.setattr(
         deploy, "run", lambda *args, **kwargs: SimpleNamespace(stdout=json.dumps([image]))
     )

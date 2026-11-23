@@ -2,10 +2,11 @@
   {
     "rule_id": "py/overly-permissive-file",
     "filename": "ci/deploy.py",
-    "line": 191,
+    "line": 197,
     "files": {
-      "ci/deploy.py": "341c8caea42323d1afd6b52c3af46d7602d92e5f91dda230cec458c27e4f58c5",
-      "infra/aws/Caddyfile": "bda29066994c19fba89a5c7aee92782aef9cf7236ba625d202e709e6981477a0"
+      "ci/deploy.py": "4fcabd63278b1f798e51affde4716f457ce8a42a3a0f355a5a544f8a57a65097",
+      "infra/aws/Caddyfile": "bda29066994c19fba89a5c7aee92782aef9cf7236ba625d202e709e6981477a0",
+      "ci/image_identity.py": "b56ae29da1f83352f103c30338bbc518f239722e7ed6cceb1be5042559b37d58"
     },
     "expires": "2027-02-01",
     "reason": "Caddy must read its public routing configuration as an unprivileged service. The file is root:caddy 0640, never writable by caddy or readable by others. The exact reviewed Caddyfile contains only public hostname/routing/header rules, no keys, credentials or private data. Both complete file hashes and the exact finding location must match."
