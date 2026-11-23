@@ -250,7 +250,7 @@ def create_app(
 
     @app.exception_handler(StoreError)
     async def store_error(request: Request, error: StoreError):
-        return JSONResponse({"detail": str(error)}, status_code=error.status)
+        return JSONResponse({"detail": error.detail}, status_code=error.status)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, error: RequestValidationError):
@@ -320,7 +320,7 @@ def create_app(
                 headers={"Retry-After": "60"},
             )
         except StoreError as error:
-            response = JSONResponse({"detail": str(error)}, status_code=error.status)
+            response = JSONResponse({"detail": error.detail}, status_code=error.status)
         response.headers.update(
             {
                 "Cache-Control": "no-store",

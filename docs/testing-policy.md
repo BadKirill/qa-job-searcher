@@ -161,3 +161,8 @@ JSON schema и PNG-эталон; реальный smoke выполняется �
 99% относится к истории успешных первых попыток production CI, не к разрешению
 пропускать 1% тестов. Security/quality gate обязателен перед автоматическим CD.
 Действующая политика и инструменты описаны в cicd.md.
+
+CodeQL проверяет две Python-версии отдельно и блокирует HIGH/CRITICAL security
+и error-level quality findings. Готовый ARM64 runtime также выполняет проверки
+PDF/PNG/DOCX и Trivy без скрытия неисправленных CVE; решения по публичному Caddyfile
+описаны в docs/cicd.md с точными хешами и сроком пересмотра.

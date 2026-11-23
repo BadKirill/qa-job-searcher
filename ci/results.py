@@ -75,8 +75,11 @@ def verify_sarif(directory, reviewed_path=REVIEWED_CODEQL):
                 rule_id = finding.get("ruleId") or finding["rule"]["id"]
                 if rule_id not in rules:
                     raise ValueError("CodeQL result has no rule metadata: " + rule_id)
-                severity = float(rules[rule_id].get("properties", {}).get("security-severity", 0))
-                if severity >= 7 and not reviewed_codeql(finding, rule_id, reviews):
+                rule = rules[rule_id]
+                score = rule.get("properties", {}).get("security-severity")
+                level = finding.get("level", rule.get("defaultConfiguration", {}).get("level"))
+                blocked = float(score) >= 7 if score is not None else level == "error"
+                if blocked and not reviewed_codeql(finding, rule_id, reviews):
                     findings.append(rule_id)
     if findings:
         raise ValueError(f"High/critical CodeQL findings: {findings}")

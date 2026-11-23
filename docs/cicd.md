@@ -20,7 +20,9 @@ Ruff проверяет Python lint/формат; ESLint проверяет Type
 инструментов не доказывает человекочитаемость автоматически.
 
 CodeQL `security-and-quality` анализирует Python, JavaScript/TypeScript и Actions;
-HIGH/CRITICAL findings блокируют gate. Bandit блокирует новые замечания средней
+HIGH/CRITICAL security findings и error-level замечания качества блокируют gate.
+Python-анализы legacy и multiuser разделены, чтобы одноимённые пакеты с разными
+сигнатурами не смешивались; оба набора исходников и CI helpers проверяются. Bandit блокирует новые замечания средней
 и высокой тяжести с высокой уверенностью. Единственное явно разобранное B310
 относится к health URL из доверенного серверного окружения: код проверки не
 получает пользовательского URL и не раскрывает ответ. Исключение привязано к
@@ -89,10 +91,10 @@ todo и flaky; Playwright retries = 0.
 
 | Набор | Backend | Component | Browser E2E | Backend строки / ветвления | Frontend строки / ветвления |
 | --- | --- | --- | --- | --- | --- |
-| Платформа multiuser | 1409 | 169 | 25 | 98,37% / 95,62% | 99,55% / 95,64% |
+| Платформа multiuser | 1416 | 169 | 25 | 98,37% / 95,62% | 99,55% / 95,64% |
 | Сохранённая SQLite-версия | 820 | 66 | 8 | 99,65% / 98,44% | 99,34% / 95,94% |
 
-CI helpers после проверки SARIF extensions: 56 passed, 283/288 строк (98,26%),
+CI helpers после проверки SARIF extensions: 58 passed, 286/291 строк (98,28%),
 81/86 ветвлений (94,19%).
 Actionlint, Ruff и ESLint прошли. После обновлений npm audit и pip-audit не находят
 известных уязвимостей в трёх проверенных наборах каждой экосистемы. Gitleaks не нашёл
@@ -109,6 +111,15 @@ Caddy работает непривилегированно и должен чи
 `ci/deploy.py` и Caddyfile. Любое изменение кода/конфига, новая локация или истечение
 срока снова блокируют gate; регрессии проверяют каждый отказ. Path injection и
 проверки URL исправлены в коде и тестах, исключения для них отсутствуют.
+
+Production runtime переведён с Debian на Python 3.12 / Alpine 3.24 после того,
+как image scan выявил неисправленные Debian CVE. Локальный ARM64-кандидат прошёл
+Trivy с нулём HIGH/CRITICAL без ignore-unfixed и исключений CVE. PostgreSQL 17
+client и DejaVu сохранены; стандартный путь шрифтов совместим с прежним рендером.
+Внутри готового образа выполняются 119 проверок PDF/DOCX/layout/template; это
+дополнительно проверяет musl/PDFium и шрифты. Реальная Docker-репетиция подтвердила
+6 healthy служб, backup, restore login/file и stop/start. Она использует только
+отдельные синтетические volumes, не рабочую БД.
 
 Финальный CI, ARM64 image scan и первая автоматическая доставка требуют успешных
 завершённых runs. Актуальные результаты публикуются в [Actions](https://github.com/BadKirill/qa-job-searcher/actions/workflows/ci.yml)

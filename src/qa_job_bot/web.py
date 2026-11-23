@@ -145,7 +145,7 @@ def create_app(settings: WebSettings | None = None, store: WebStore | None = Non
 
     @app.exception_handler(StoreError)
     async def store_error(request: Request, error: StoreError):
-        return JSONResponse({"detail": str(error)}, status_code=error.status)
+        return JSONResponse({"detail": error.detail}, status_code=error.status)
 
     @app.exception_handler(DocumentFileError)
     async def document_error(request: Request, error: DocumentFileError):
@@ -186,7 +186,7 @@ def create_app(settings: WebSettings | None = None, store: WebStore | None = Non
                 )
             response = await call_next(request)
         except StoreError as error:
-            response = JSONResponse({"detail": str(error)}, status_code=error.status)
+            response = JSONResponse({"detail": error.detail}, status_code=error.status)
         response.headers.update(
             {
                 "Cache-Control": "no-store",

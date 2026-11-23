@@ -372,7 +372,8 @@ def test_admin_api_no_secrets_reissue_revoke_disable_and_forgery(api_world):
     ).json()
     rows = admin.get("/api/admin/invitations").json()
     assert invitation["token"] not in json.dumps(rows) and "token_hash" not in json.dumps(rows)
-    assert admin.delete(f"/api/admin/invitations/{invitation['id']}").status_code == 204
+    response = admin.delete(f"/api/admin/invitations/{invitation['id']}")
+    assert response.status_code == 204
     renewed = admin.post(f"/api/admin/users/{invitation['user_id']}/invitations").json()
     assert renewed["token"] != invitation["token"]
     assert admin.patch(f"/api/admin/users/{member_id}", json={"disabled": True}).status_code == 200
@@ -632,8 +633,10 @@ def test_creator_is_recorded_and_administrator_can_revoke_reset_link(api_world):
             == admin_id
         )
         assert connection.execute(select(s.invitations.c.created_by_id)).scalar_one() == admin_id
-    assert other.delete(f"/api/admin/password-resets/{issued['id']}").status_code == 403
-    assert admin.delete(f"/api/admin/password-resets/{issued['id']}").status_code == 204
+    response = other.delete(f"/api/admin/password-resets/{issued['id']}")
+    assert response.status_code == 403
+    response = admin.delete(f"/api/admin/password-resets/{issued['id']}")
+    assert response.status_code == 204
     response = other.post(
         "/api/password-resets/accept", json={"token": issued["token"], "password": NEW_PASSWORD}
     )

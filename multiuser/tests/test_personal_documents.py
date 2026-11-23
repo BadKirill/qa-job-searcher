@@ -500,7 +500,8 @@ def test_api_pins_facts_files_historical_card_and_summary_without_exposing_paths
                 assert name in " ".join(
                     page.extract_text() for page in PdfReader(io.BytesIO(downloaded.content)).pages
                 )
-        assert client.delete("/api/tasks/" + own[1]["id"]).status_code == 204
+        response = client.delete("/api/tasks/" + own[1]["id"])
+        assert response.status_code == 204
         assert (
             client.get("/api/artifacts/" + ready["artifacts"][0]["id"] + "/download").status_code
             == 404

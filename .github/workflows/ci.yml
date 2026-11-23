@@ -88,7 +88,7 @@ jobs:
           path: ci/reports/
           retention-days: 7
   codeql:
-    name: CodeQL (${{ matrix.language }})
+    name: CodeQL (${{ matrix.language }}, ${{ matrix.scope }})
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -97,18 +97,36 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [python, javascript-typescript, actions]
+        include:
+          - language: python
+            scope: legacy
+            source: .
+            config: '{"paths-ignore":["multiuser"]}'
+          - language: python
+            scope: platform
+            source: multiuser
+            config: '{}'
+          - language: javascript-typescript
+            scope: web
+            source: .
+            config: '{}'
+          - language: actions
+            scope: pipelines
+            source: .
+            config: '{}'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea
         with:
           languages: ${{ matrix.language }}
+          source-root: ${{ matrix.source }}
+          config: ${{ matrix.config }}
           build-mode: none
           queries: security-and-quality
       - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea
         with:
           output: ci/reports/codeql
-          category: /language:${{ matrix.language }}
+          category: /language:${{ matrix.language }}/scope:${{ matrix.scope }}
           wait-for-processing: true
       - run: python ci/results.py --sarif ci/reports/codeql
   image:
@@ -119,6 +137,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - run: docker build -f multiuser/Dockerfile.runtime --label org.opencontainers.image.revision="$GITHUB_SHA" -t "job-searcher-runtime:$GITHUB_SHA" multiuser
+      - name: Verify document rendering in ARM64 image
+        run: docker run --rm --network none --mount "type=bind,source=$PWD/multiuser/tests,target=/tests,readonly" --tmpfs /tmp:rw,nosuid,size=256m "job-searcher-runtime:$GITHUB_SHA" python -m pytest /tests/test_document_files.py /tests/test_document_layout.py /tests/test_pdf_template.py -q -o addopts= -p no:cacheprovider
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
           version: v0.76.2

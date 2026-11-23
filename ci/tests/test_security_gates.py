@@ -155,3 +155,25 @@ def test_codeql_review_is_exact_and_expires(tmp_path, defect):
             results.verify_sarif(tmp_path, review_path)
     else:
         assert results.verify_sarif(tmp_path, review_path)["high_or_critical"] == 0
+
+
+@pytest.mark.parametrize("level", ["error", "warning"])
+def test_codeql_quality_errors_block_without_security_score(tmp_path, level):
+    report = {
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "rules": [{"id": "quality", "defaultConfiguration": {"level": level}}]
+                    }
+                },
+                "results": [{"ruleId": "quality"}],
+            }
+        ]
+    }
+    (tmp_path / "quality.sarif").write_text(json.dumps(report))
+    if level == "error":
+        with pytest.raises(ValueError):
+            results.verify_sarif(tmp_path)
+    else:
+        assert results.verify_sarif(tmp_path)["high_or_critical"] == 0

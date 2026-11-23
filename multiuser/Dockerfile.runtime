@@ -6,16 +6,17 @@ COPY frontend ./
 COPY tests/fixtures/search-baseline.json /tests/fixtures/search-baseline.json
 RUN npm run build
 
-FROM python:3.12-slim-trixie
+FROM python:3.12-alpine3.24
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 WEB_HOST=0.0.0.0 WEB_DATA_DIR=/app/data WEB_FRONTEND_DIR=/app/frontend/dist
 WORKDIR /app
-RUN --mount=type=secret,id=system_ca sh -c 'if [ -f /run/secrets/system_ca ]; then export SSL_CERT_FILE=/run/secrets/system_ca; fi; apt-get update && apt-get install -y --no-install-recommends postgresql-client-17 fonts-dejavu-core && rm -rf /var/lib/apt/lists/*'
+RUN --mount=type=secret,id=system_ca sh -c 'if [ -f /run/secrets/system_ca ]; then export SSL_CERT_FILE=/run/secrets/system_ca; export CURL_CA_BUNDLE=/run/secrets/system_ca; fi; apk upgrade --no-cache && apk add --no-cache postgresql17-client font-dejavu libstdc++'
+RUN mkdir -p /usr/share/fonts/truetype && ln -s /usr/share/fonts/dejavu /usr/share/fonts/truetype/dejavu
 COPY requirements.lock ./
 RUN --mount=type=secret,id=system_ca sh -c 'if [ -f /run/secrets/system_ca ]; then export PIP_CERT=/run/secrets/system_ca; fi; pip install --no-cache-dir -r requirements.lock'
 COPY pyproject.toml README.md ./
 COPY src ./src
 RUN --mount=type=secret,id=system_ca sh -c 'if [ -f /run/secrets/system_ca ]; then export PIP_CERT=/run/secrets/system_ca; fi; pip install --no-cache-dir --no-deps .'
 COPY --from=frontend /frontend/dist ./frontend/dist
-RUN groupadd -g 10001 job-searcher && useradd -u 10001 -g 10001 -M job-searcher && mkdir -p /app/data /backups && chown 10001:10001 /app/data /backups && chmod 700 /app/data /backups
+RUN addgroup -g 10001 job-searcher && adduser -D -u 10001 -G job-searcher job-searcher && mkdir -p /app/data /backups && chown 10001:10001 /app/data /backups && chmod 700 /app/data /backups
 USER 10001:10001
 CMD ["qa-job-web"]
