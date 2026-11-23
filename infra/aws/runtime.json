@@ -153,15 +153,24 @@
     "SecurityGroup": {
       "Type": "AWS::EC2::SecurityGroup",
       "Properties": {
-        "GroupDescription": "QA Job Searcher: no inbound access; SSM and ngrok use outbound TLS",
+        "GroupDescription": "QA Job Searcher: Cloudflare ingress managed separately; outbound HTTP and TLS",
         "VpcId": {
           "Ref": "VpcId"
         },
         "SecurityGroupEgress": [
           {
-            "IpProtocol": "-1",
+            "IpProtocol": "tcp",
+            "FromPort": 80,
+            "ToPort": 80,
             "CidrIp": "0.0.0.0/0",
-            "Description": "Operating system updates, SSM, AWS, ngrok, and job sources"
+            "Description": "HTTP sources, package updates and certificate validation"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 443,
+            "ToPort": 443,
+            "CidrIp": "0.0.0.0/0",
+            "Description": "TLS for SSM, AWS, OpenAI and dynamic job sources"
           }
         ],
         "Tags": [

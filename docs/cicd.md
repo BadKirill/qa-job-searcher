@@ -30,7 +30,12 @@ HIGH/CRITICAL findings блокируют gate. Bandit блокирует нов
 `pip-audit` проверяет три Python lock-набора, `npm audit` — три frontend/CI набора
 и блокирует moderate и выше. Gitleaks проверяет Git-историю. Trivy проверяет IaC
 и готовый ARM64 image, блокируя HIGH/CRITICAL. Неисправимые замечания не скрываются
-флагом ignore-unfixed. Actions закреплены по полным commit SHA; CI-зависимости
+флагом ignore-unfixed.
+Для IaC два решения перечислены в `ci/trivy-reviewed.yaml` с точными путями и
+сроком до 1 февраля 2027: исходящие TCP 80/443 к динамическим внешним адресам
+и SSE-S3 вместо платного customer-managed KMS key. Входящие правила этим не
+расширяются; остальной исходящий трафик запрещён. Уведомления CVE не исключаются.
+Формат scoped/expiring decisions описан в [документации Trivy](https://trivy.dev/docs/latest/guide/configuration/filtering/). Actions закреплены по полным commit SHA; CI-зависимости
 закреплены с хешами. Dependabot alerts и secret-scanning push protection включены.
 Отчёты содержат только код и синтетические тестовые данные, срок хранения 7 дней.
 
@@ -79,7 +84,7 @@ Compose override. Старый ручной workflow Deploy VPS удалён: о
 
 ## Фактическое состояние
 
-Локальные проверки новых CI helpers: 47 passed, покрытие строк и ветвлений >90%.
+Локальные проверки новых CI helpers: 48 passed, покрытие строк и ветвлений >90%.
 Actionlint, Ruff и ESLint прошли. После обновлений npm audit и pip-audit не находят
 известных уязвимостей в проверенных dependency-наборах. Полный финальный CI и первый
 автоматический CD должны быть подтверждены ссылками на реальные завершённые runs;

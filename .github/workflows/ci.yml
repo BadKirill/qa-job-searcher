@@ -76,6 +76,7 @@ jobs:
         with:
           version: v0.76.2
           scan-type: config
+          trivyignores: ci/trivy-reviewed.yaml
           scan-ref: .
           severity: HIGH,CRITICAL
           exit-code: '1'

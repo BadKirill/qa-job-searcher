@@ -1,0 +1,12 @@
+misconfigurations:
+  - id: AVD-AWS-0104
+    paths:
+      - infra/aws/runtime.json
+      - infra/aws/stack.json
+    expired_at: 2027-02-01
+    statement: Only TCP 80 and 443 are allowed. Public job feeds, OpenAI, package mirrors and AWS use changing destination addresses. Fixed CIDRs would break required integrations. Inbound access is restricted separately to Cloudflare and loopback.
+  - id: AVD-AWS-0132
+    paths:
+      - infra/aws/stack.json
+    expired_at: 2027-02-01
+    statement: The private versioned bucket uses SSE-S3 AES256, TLS-only policy and scoped instance/deployment roles. A customer-managed KMS key is not required for this minimum-cost single-project deployment. No plaintext storage is accepted.
