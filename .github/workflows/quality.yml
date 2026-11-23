@@ -6,7 +6,6 @@ permissions:
 env:
   PIP_DEFAULT_TIMEOUT: '60'
   PIP_RETRIES: '5'
-  PIP_RESUME_RETRIES: '5'
 jobs:
   quality:
     runs-on: ubuntu-24.04
