@@ -6,7 +6,7 @@
     "lint": "cd .. && ci/node_modules/.bin/eslint frontend/src multiuser/frontend/src --max-warnings 0"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.0",
+    "@eslint/js": "^10.0.1",
     "eslint": "10.15.0",
     "typescript-eslint": "8.73.0"
   }
