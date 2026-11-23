@@ -132,7 +132,19 @@ def test_release_manifest_pins_every_payload(monkeypatch, tmp_path):
     )
     (destination / "runtime-image.tar.gz").write_bytes(b"synthetic-image")
     monkeypatch.setattr(
-        package_release.subprocess, "check_output", lambda *args, **kwargs: "sha256:" + "a" * 64
+        package_release.subprocess,
+        "check_output",
+        lambda *args, **kwargs: json.dumps(
+            [
+                {
+                    "Id": "sha256:" + "a" * 64,
+                    "Architecture": "arm64",
+                    "Os": "linux",
+                    "RootFS": {"Layers": ["sha256:" + "c" * 64]},
+                    "Config": {"Labels": {"org.opencontainers.image.revision": "b" * 40}},
+                }
+            ]
+        ),
     )
     manifest = package_release.package(source, destination, "b" * 40)
     assert set(manifest["files"]) == {
@@ -150,3 +162,17 @@ def test_release_manifest_pins_every_payload(monkeypatch, tmp_path):
     monkeypatch.setattr("sys.argv", ["package", "b" * 40, str(destination)])
     monkeypatch.setattr(package_release, "package", lambda *args: manifest)
     package_release.main()
+
+
+@pytest.mark.parametrize("defect", ["architecture", "revision"])
+def test_release_packaging_rejects_wrong_platform_or_source(tmp_path, monkeypatch, defect):
+    metadata = {
+        "Id": "sha256:" + "a" * 64,
+        "Architecture": "amd64" if defect == "architecture" else "arm64",
+        "Config": {"Labels": {"org.opencontainers.image.revision": "wrong"}},
+    }
+    monkeypatch.setattr(
+        package_release.subprocess, "check_output", lambda *args, **kwargs: json.dumps([metadata])
+    )
+    with pytest.raises(ValueError, match="architecture or revision"):
+        package_release.package(tmp_path, tmp_path / "release", "b" * 40)
