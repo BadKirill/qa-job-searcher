@@ -8,15 +8,15 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 def check_header(pdf_path, docx_path):
     document = Document(docx_path)
     heading = next(
-        index for index, paragraph in enumerate(document.paragraphs)
+        index
+        for index, paragraph in enumerate(document.paragraphs)
         if paragraph.text == "Experience"
     )
     assert heading >= 3
     for paragraph in document.paragraphs[:heading]:
         assert paragraph.style.paragraph_format.alignment == WD_ALIGN_PARAGRAPH.CENTER
     assert (
-        document.paragraphs[heading + 1].style.paragraph_format.alignment
-        == WD_ALIGN_PARAGRAPH.LEFT
+        document.paragraphs[heading + 1].style.paragraph_format.alignment == WD_ALIGN_PARAGRAPH.LEFT
     )
     section = document.sections[0]
     center = (section.page_width.pt + section.left_margin.pt - section.right_margin.pt) / 2

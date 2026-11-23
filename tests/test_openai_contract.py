@@ -195,9 +195,7 @@ async def test_agent_mcp_and_openai_http_contract_remain_isolated(monkeypatch, s
         "OpenAITransport",
         lambda **kwargs: OpenAITransport(**kwargs, http_transport=transport),
     )
-    settings = agent_gateway.OpenAISettings(
-        api_key, "agent_synthetic", "gpt-5.6-luna", "medium"
-    )
+    settings = agent_gateway.OpenAISettings(api_key, "agent_synthetic", "gpt-5.6-luna", "medium")
     gateway = agent_gateway.AgentGateway(settings=settings)
     generated = validate_draft(await gateway.generate(context), context)
     reviewed = validate_review(await gateway.review(context, generated), generated, context)

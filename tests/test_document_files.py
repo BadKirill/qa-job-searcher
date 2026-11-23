@@ -302,3 +302,13 @@ def test_cli_parser_main(monkeypatch):
     output.truncate()
     files.main()
     assert "error" in json.loads(output.getvalue())
+
+
+def test_utf16_xml_entity_declaration_is_rejected():
+    from qa_job_bot.document_files import DocumentFileError, _xml
+
+    payload = (
+        '<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE x [<!ENTITY a "hidden">]><x>&a;</x>'
+    ).encode("utf-16")
+    with pytest.raises(DocumentFileError, match="XML entities"):
+        _xml(payload)

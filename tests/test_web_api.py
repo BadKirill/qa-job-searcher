@@ -506,12 +506,15 @@ def test_document_deletion_removes_registered_and_broken_files(client):
 def test_document_deletion_rejects_active_search_and_unsafe_directory(client, tmp_path):
     store = authenticate(client)
     active = store.enqueue("cv", "active", {}, "active-request")
-    assert client.delete(f"/api/tasks/{active['id']}").status_code == 409
+    response = client.delete(f"/api/tasks/{active['id']}")
+    assert response.status_code == 409
     store.cancel_task(active["id"])
-    assert client.delete(f"/api/tasks/{active['id']}").status_code == 204
+    response = client.delete(f"/api/tasks/{active['id']}")
+    assert response.status_code == 204
     search = store.enqueue("search", "search", {}, "search-request")
     store.cancel_task(search["id"])
-    assert client.delete(f"/api/tasks/{search['id']}").status_code == 422
+    response = client.delete(f"/api/tasks/{search['id']}")
+    assert response.status_code == 422
 
     broken = store.enqueue("cv", "broken", {}, "broken-request")
     store.cancel_task(broken["id"])
@@ -520,12 +523,14 @@ def test_document_deletion_rejects_active_search_and_unsafe_directory(client, tm
     directory = client.app.state.settings.data_dir / "artifacts" / broken["id"]
     directory.parent.mkdir(parents=True, exist_ok=True)
     directory.symlink_to(outside, target_is_directory=True)
-    assert client.delete(f"/api/tasks/{broken['id']}").status_code == 409
+    response = client.delete(f"/api/tasks/{broken['id']}")
+    assert response.status_code == 409
     assert outside.exists()
     assert store.task(broken["id"])["status"] == "cancelled"
     directory.unlink()
     directory.write_bytes(b"not-a-directory")
-    assert client.delete(f"/api/tasks/{broken['id']}").status_code == 409
+    response = client.delete(f"/api/tasks/{broken['id']}")
+    assert response.status_code == 409
     assert store.task(broken["id"])["status"] == "cancelled"
 
 
@@ -544,7 +549,8 @@ def test_document_deletion_restores_directory_after_cleanup_failure(client, monk
     assert path.exists()
     assert client.get(f"/api/tasks/{artifact['task_id']}").status_code == 200
     monkeypatch.setattr(web.shutil, "rmtree", original_rmtree)
-    assert client.delete(f"/api/tasks/{artifact['task_id']}").status_code == 204
+    response = client.delete(f"/api/tasks/{artifact['task_id']}")
+    assert response.status_code == 204
 
 
 async def test_sse_change_heartbeat_and_revocation(client, monkeypatch):
@@ -571,3 +577,16 @@ def test_main_invokes_loopback_server(monkeypatch):
     monkeypatch.setattr(web.uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
     web.main()
     assert calls[0][1]["host"] == "127.0.0.1" and not calls[0][1]["proxy_headers"]
+
+
+def test_main_can_bind_container_network_only_when_configured(monkeypatch):
+    calls = []
+    monkeypatch.setattr(web, "create_app", lambda: "app")
+    monkeypatch.setattr(web.uvicorn, "run", lambda *args, **kwargs: calls.append(kwargs))
+    monkeypatch.setenv("WEB_HOST", "0.0.0.0")
+    web.main()
+    assert calls[0]["host"] == "0.0.0.0"
+    assert not calls[0]["proxy_headers"]
+    monkeypatch.setenv("WEB_HOST", "example.com")
+    with pytest.raises(ValueError, match="WEB_HOST"):
+        web.main()

@@ -18,7 +18,11 @@ def test_launchd_private_loopback_worker_and_constant_domain(tmp_path, monkeypat
         data = plistlib.loads(file.read_bytes())
         assert data["KeepAlive"] and data["Umask"] == 0o077
         assert data["EnvironmentVariables"]["WEB_PORT"] == "8033"
-        assert "https://fixture.ngrok-free.app" in data["EnvironmentVariables"]["WEB_ORIGINS"]
+        assert data["EnvironmentVariables"]["WEB_ORIGINS"].split(",") == [
+            "http://127.0.0.1:8033",
+            "http://localhost:8033",
+            "https://fixture.ngrok-free.app",
+        ]
     tunnel = plistlib.loads(files[2].read_bytes())
     assert "--inspect=false" in tunnel["ProgramArguments"]
     assert "--url=https://fixture.ngrok-free.app" in tunnel["ProgramArguments"]

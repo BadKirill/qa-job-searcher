@@ -30,6 +30,39 @@ def test_load_private_key_and_selected_model(configured, monkeypatch):
     assert replace(settings, project_id=None).project_id is None
 
 
+def test_load_private_files_from_container_mounts(configured, monkeypatch):
+    other = configured / "other"
+    other.mkdir()
+    key = other / "key"
+    key.write_text("sk-" + "mounted" * 4)
+    key.chmod(0o600)
+    config = other / "agent.json"
+    config.write_text(json.dumps({"agent_id": "agent_mounted", "project_id": "proj_mounted"}))
+    config.chmod(0o600)
+    monkeypatch.setenv("OPENAI_API_KEY_FILE", str(key))
+    monkeypatch.setenv("OPENAI_AGENT_CONFIG_FILE", str(config))
+    settings = OpenAISettings.load(configured)
+    assert settings.api_key == key.read_text()
+    assert settings.agent_id == "agent_mounted"
+    assert settings.project_id == "proj_mounted"
+
+
+@pytest.mark.parametrize("name", ["OPENAI_API_KEY_FILE", "OPENAI_AGENT_CONFIG_FILE"])
+@pytest.mark.parametrize("problem", ["missing", "public", "symlink"])
+def test_container_file_override_fails_closed(configured, monkeypatch, name, problem):
+    target = configured / f"{name.lower()}.txt"
+    if problem == "missing":
+        pass
+    elif problem == "symlink":
+        target.symlink_to(configured / "openai-api-key")
+    else:
+        target.write_text("secret")
+        target.chmod(0o644)
+    monkeypatch.setenv(name, str(target))
+    with pytest.raises(OpenAIConfigurationError):
+        OpenAISettings.load(configured)
+
+
 @pytest.mark.parametrize(
     "field,value",
     [

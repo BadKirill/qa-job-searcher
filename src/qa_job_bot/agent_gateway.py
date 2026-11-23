@@ -84,7 +84,9 @@ class AgentUnavailable(RuntimeError):
 
 class AgentGateway:
     def __init__(
-        self, settings: OpenAISettings | None = None, timeout: float = 180,
+        self,
+        settings: OpenAISettings | None = None,
+        timeout: float = 180,
         data_dir: Path = Path("data"),
     ):
         self.settings = settings

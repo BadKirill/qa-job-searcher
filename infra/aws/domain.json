@@ -1,0 +1,373 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Stable endpoint for getcareer.app on the existing eu-north-1 runtime",
+  "Resources": {
+    "Address": {
+      "Type": "AWS::EC2::EIP",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "Domain": "vpc",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "getcareer.app"
+          },
+          {
+            "Key": "Project",
+            "Value": "QAJobSearcher"
+          }
+        ]
+      }
+    },
+    "Association": {
+      "Type": "AWS::EC2::EIPAssociation",
+      "Properties": {
+        "AllocationId": {
+          "Fn::GetAtt": [
+            "Address",
+            "AllocationId"
+          ]
+        },
+        "InstanceId": "i-030fa1abecd9da0ac"
+      }
+    },
+    "Cloudflare80Range0": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 80,
+        "ToPort": 80,
+        "CidrIp": "173.245.48.0/20",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare80Range1": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 80,
+        "ToPort": 80,
+        "CidrIp": "103.21.244.0/22",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare80Range2": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 80,
+        "ToPort": 80,
+        "CidrIp": "103.22.200.0/22",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare80Range3": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 80,
+        "ToPort": 80,
+        "CidrIp": "103.31.4.0/22",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare80Range4": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 80,
+        "ToPort": 80,
+        "CidrIp": "141.101.64.0/18",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare80Range5": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 80,
+        "ToPort": 80,
+        "CidrIp": "108.162.192.0/18",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare80Range6": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 80,
+        "ToPort": 80,
+        "CidrIp": "190.93.240.0/20",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare80Range7": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 80,
+        "ToPort": 80,
+        "CidrIp": "188.114.96.0/20",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare80Range8": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 80,
+        "ToPort": 80,
+        "CidrIp": "197.234.240.0/22",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare80Range9": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 80,
+        "ToPort": 80,
+        "CidrIp": "198.41.128.0/17",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare80Range10": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 80,
+        "ToPort": 80,
+        "CidrIp": "162.158.0.0/15",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare80Range11": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 80,
+        "ToPort": 80,
+        "CidrIp": "104.16.0.0/13",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare80Range12": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 80,
+        "ToPort": 80,
+        "CidrIp": "104.24.0.0/14",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare80Range13": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 80,
+        "ToPort": 80,
+        "CidrIp": "172.64.0.0/13",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare80Range14": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 80,
+        "ToPort": 80,
+        "CidrIp": "131.0.72.0/22",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare443Range0": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 443,
+        "ToPort": 443,
+        "CidrIp": "173.245.48.0/20",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare443Range1": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 443,
+        "ToPort": 443,
+        "CidrIp": "103.21.244.0/22",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare443Range2": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 443,
+        "ToPort": 443,
+        "CidrIp": "103.22.200.0/22",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare443Range3": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 443,
+        "ToPort": 443,
+        "CidrIp": "103.31.4.0/22",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare443Range4": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 443,
+        "ToPort": 443,
+        "CidrIp": "141.101.64.0/18",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare443Range5": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 443,
+        "ToPort": 443,
+        "CidrIp": "108.162.192.0/18",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare443Range6": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 443,
+        "ToPort": 443,
+        "CidrIp": "190.93.240.0/20",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare443Range7": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 443,
+        "ToPort": 443,
+        "CidrIp": "188.114.96.0/20",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare443Range8": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 443,
+        "ToPort": 443,
+        "CidrIp": "197.234.240.0/22",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare443Range9": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 443,
+        "ToPort": 443,
+        "CidrIp": "198.41.128.0/17",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare443Range10": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 443,
+        "ToPort": 443,
+        "CidrIp": "162.158.0.0/15",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare443Range11": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 443,
+        "ToPort": 443,
+        "CidrIp": "104.16.0.0/13",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare443Range12": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 443,
+        "ToPort": 443,
+        "CidrIp": "104.24.0.0/14",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare443Range13": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 443,
+        "ToPort": 443,
+        "CidrIp": "172.64.0.0/13",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    },
+    "Cloudflare443Range14": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-067c73ffe2da37ff0",
+        "IpProtocol": "tcp",
+        "FromPort": 443,
+        "ToPort": 443,
+        "CidrIp": "131.0.72.0/22",
+        "Description": "GetCareer Cloudflare proxy and ACME validation"
+      }
+    }
+  },
+  "Outputs": {
+    "PublicIPv4": {
+      "Value": {
+        "Ref": "Address"
+      }
+    }
+  }
+}

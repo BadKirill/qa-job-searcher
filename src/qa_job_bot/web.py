@@ -145,7 +145,7 @@ def create_app(settings: WebSettings | None = None, store: WebStore | None = Non
 
     @app.exception_handler(StoreError)
     async def store_error(request: Request, error: StoreError):
-        return JSONResponse({"detail": str(error)}, status_code=error.status)
+        return JSONResponse({"detail": error.detail}, status_code=error.status)
 
     @app.exception_handler(DocumentFileError)
     async def document_error(request: Request, error: DocumentFileError):
@@ -186,7 +186,7 @@ def create_app(settings: WebSettings | None = None, store: WebStore | None = Non
                 )
             response = await call_next(request)
         except StoreError as error:
-            response = JSONResponse({"detail": str(error)}, status_code=error.status)
+            response = JSONResponse({"detail": error.detail}, status_code=error.status)
         response.headers.update(
             {
                 "Cache-Control": "no-store",
@@ -534,9 +534,12 @@ def create_app(settings: WebSettings | None = None, store: WebStore | None = Non
 
 
 def main() -> None:
+    host = os.getenv("WEB_HOST", "127.0.0.1")
+    if host not in {"127.0.0.1", "0.0.0.0"}:
+        raise ValueError("WEB_HOST must be 127.0.0.1 or 0.0.0.0")
     uvicorn.run(
         create_app(),
-        host="127.0.0.1",
+        host=host,
         port=int(os.getenv("WEB_PORT", "8000")),
         proxy_headers=False,
         access_log=False,

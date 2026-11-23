@@ -19,3 +19,6 @@ frontend/test-results/
 .runtime/
 *.log
 .DS_Store
+ci/node_modules/
+ci/reports/
+test-results/

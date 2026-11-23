@@ -1,0 +1,110 @@
+x-runtime: &runtime
+  image: job-searcher-runtime:local
+  build:
+    context: .
+    dockerfile: Dockerfile.runtime
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 120s
+  environment: &environment
+    DATABASE_URL: postgresql://job_searcher:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in a private env file}@postgres:5432/${POSTGRES_DB:-job_searcher}
+    WEB_ORIGINS: ${WEB_ORIGINS:-http://127.0.0.1:8000}
+    WEB_DATA_DIR: ${WEB_DATA_DIR:-/app/data}
+    OPENAI_USE_ENV_PROXY: ${OPENAI_USE_ENV_PROXY:-0}
+  volumes:
+    - personal-data:/app/data
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+  healthcheck:
+    test: ["CMD", "python", "-m", "qa_job_bot.operations", "service"]
+    interval: 15s
+    timeout: 7s
+    retries: 4
+    start_period: 20s
+
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: job_searcher
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in a private env file}
+      POSTGRES_DB: ${POSTGRES_DB:-job_searcher}
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U job_searcher -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  migrate:
+    <<: *runtime
+    restart: "no"
+    command: ["python", "-m", "qa_job_bot.pg_database"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+  api:
+    <<: *runtime
+    command: ["qa-job-web"]
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8000}:8000"
+    environment:
+      <<: *environment
+      WEB_ORIGINS: ${WEB_ORIGINS:-http://127.0.0.1:8000}
+    healthcheck:
+      test: ["CMD", "python", "-m", "qa_job_bot.operations", "api"]
+      interval: 15s
+      timeout: 7s
+      retries: 4
+      start_period: 20s
+  scheduler:
+    <<: *runtime
+    command: ["qa-job-scheduler"]
+  search-worker:
+    <<: *runtime
+    command: ["qa-job-worker"]
+    environment:
+      <<: *environment
+      WORKER_LANE: search
+  chat-worker:
+    <<: *runtime
+    command: ["qa-job-worker"]
+    environment:
+      <<: *environment
+      WORKER_LANE: chat
+  document-worker:
+    <<: *runtime
+    command: ["qa-job-worker"]
+    environment:
+      <<: *environment
+      WORKER_LANE: document
+  maintenance:
+    <<: *runtime
+    profiles: [tools]
+    restart: "no"
+    command: ["python", "-m", "qa_job_bot.runtime_backup", "--help"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    volumes:
+      - personal-data:/app/data
+      - backups:/backups
+  telegram:
+    <<: *runtime
+    profiles: [telegram]
+    command: ["python", "-m", "qa_job_bot.personal_telegram", "run"]
+
+volumes:
+  database:
+  personal-data:
+  backups:

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
 from datetime import UTC
 from email.utils import parsedate_to_datetime
 
 import httpx
+from defusedxml import ElementTree as ET
 
 from qa_job_bot.models import Job
 from qa_job_bot.sources.base import JobSource

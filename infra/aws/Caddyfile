@@ -1,0 +1,21 @@
+getcareer.app {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        -Server
+    }
+    @internal path /health/* /docs /docs/* /redoc /openapi.json /metrics /debug /debug/* /.env /.git* /api/setup
+    respond @internal 404
+    reverse_proxy 127.0.0.1:8000 {
+        flush_interval -1
+    }
+}
+
+www.getcareer.app {
+    redir https://getcareer.app{uri} permanent
+}
+
+api.getcareer.app {
+    header -Server
+    respond 404
+}

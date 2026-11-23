@@ -20,6 +20,7 @@ class StoreError(ValueError):
     def __init__(self, message: str, status: int = 400):
         super().__init__(message)
         self.status = status
+        self.detail = message
 
 
 def encode(value: Any) -> str:

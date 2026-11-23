@@ -1,0 +1,116 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "GitHub OIDC delivery of validated GetCareer releases to one existing EC2",
+  "Resources": {
+    "GitHubOIDC": {
+      "Type": "AWS::IAM::OIDCProvider",
+      "Properties": {
+        "Url": "https://token.actions.githubusercontent.com",
+        "ClientIdList": [
+          "sts.amazonaws.com"
+        ]
+      }
+    },
+    "DeploymentRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "qa-job-searcher-github-deploy",
+        "MaxSessionDuration": 3600,
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Federated": {
+                  "Ref": "GitHubOIDC"
+                }
+              },
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "StringEquals": {
+                  "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+                  "token.actions.githubusercontent.com:sub": "repo:BadKirill/qa-job-searcher:environment:production"
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "DeployExactRuntime",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "DeliverCodeOnly",
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:PutObject",
+                    "s3:AbortMultipartUpload"
+                  ],
+                  "Resource": "arn:aws:s3:::qa-job-searcher-577331852274-eu-north-1/artifacts/releases/*"
+                },
+                {
+                  "Sid": "RunInstalledDeployment",
+                  "Effect": "Allow",
+                  "Action": "ssm:SendCommand",
+                  "Resource": [
+                    "arn:aws:ec2:eu-north-1:577331852274:instance/i-030fa1abecd9da0ac",
+                    "arn:aws:ssm:eu-north-1:577331852274:document/qa-job-searcher-deploy"
+                  ]
+                },
+                {
+                  "Sid": "ObserveDeployment",
+                  "Effect": "Allow",
+                  "Action": [
+                    "ssm:GetCommandInvocation"
+                  ],
+                  "Resource": "*"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "DeployDocument": {
+      "Type": "AWS::SSM::Document",
+      "Properties": {
+        "Name": "qa-job-searcher-deploy",
+        "DocumentType": "Command",
+        "DocumentFormat": "JSON",
+        "TargetType": "/AWS::EC2::Instance",
+        "Content": {
+          "schemaVersion": "2.2",
+          "description": "Deploy a verified immutable GetCareer release using the installed root helper",
+          "parameters": {
+            "Commit": {
+              "type": "String",
+              "allowedPattern": "^[a-f0-9]{40}$",
+              "interpolationType": "ENV_VAR"
+            },
+            "ManifestSHA256": {
+              "type": "String",
+              "allowedPattern": "^[a-f0-9]{64}$",
+              "interpolationType": "ENV_VAR"
+            }
+          },
+          "mainSteps": [
+            {
+              "action": "aws:runShellScript",
+              "name": "deploy",
+              "inputs": {
+                "timeoutSeconds": "1800",
+                "runCommand": [
+                  "set -eu",
+                  "exec python3 /usr/local/lib/qa-job-searcher/deploy.py \"$SSM_Commit\" \"$SSM_ManifestSHA256\""
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

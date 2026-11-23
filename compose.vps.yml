@@ -1,0 +1,76 @@
+x-app: &app
+  image: qa-job-searcher:${DEPLOY_REVISION:-local}
+  build:
+    context: .
+    dockerfile: Dockerfile.vps
+  user: "${DEPLOY_UID:?DEPLOY_UID is required}:${DEPLOY_GID:?DEPLOY_GID is required}"
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp:mode=1777
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  volumes:
+    - ${DEPLOY_DATA_DIR:?DEPLOY_DATA_DIR is required}:/app/data
+
+services:
+  web:
+    <<: *app
+    command: qa-job-web
+    environment:
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: "8000"
+      WEB_DATA_DIR: /app/data
+      WEB_FRONTEND_DIR: /app/frontend/dist
+      WEB_ORIGINS: https://${APP_DOMAIN:?APP_DOMAIN is required}
+    expose:
+      - "8000"
+
+  worker:
+    <<: *app
+    command: qa-job-worker
+    environment:
+      WEB_DATA_DIR: /app/data
+      OPENAI_API_KEY_FILE: /run/secrets/openai-api-key
+      OPENAI_AGENT_CONFIG_FILE: /run/secrets/openai-agent.json
+    secrets:
+      - source: openai_api_key
+        target: openai-api-key
+      - source: openai_agent_config
+        target: openai-agent.json
+
+  tunnel:
+    image: ngrok/ngrok:3
+    restart: unless-stopped
+    command:
+      - http
+      - web:8000
+      - --url=https://${APP_DOMAIN:?APP_DOMAIN is required}
+      - --inspect=false
+    env_file:
+      - ${DEPLOY_SECRET_DIR:?DEPLOY_SECRET_DIR is required}/ngrok.env
+    depends_on:
+      - web
+
+  bot:
+    <<: *app
+    profiles:
+      - bot
+    command: qa-job-bot
+    environment:
+      DATABASE_PATH: /app/data/jobs.sqlite3
+      TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram-bot-token
+      TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS:-}
+    secrets:
+      - source: telegram_bot_token
+        target: telegram-bot-token
+
+secrets:
+  openai_api_key:
+    file: ${DEPLOY_SECRET_DIR:?DEPLOY_SECRET_DIR is required}/openai-api-key
+  openai_agent_config:
+    file: ${DEPLOY_SECRET_DIR:?DEPLOY_SECRET_DIR is required}/openai-agent.json
+  telegram_bot_token:
+    file: ${DEPLOY_SECRET_DIR:?DEPLOY_SECRET_DIR is required}/telegram-bot-token

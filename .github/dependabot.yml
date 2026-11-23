@@ -1,0 +1,16 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directories: [/frontend, /multiuser/frontend, /ci]
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: pip
+    directories: [/, /multiuser, /ci]
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

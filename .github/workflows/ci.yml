@@ -1,0 +1,224 @@
+name: CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+jobs:
+  legacy:
+    uses: ./.github/workflows/quality.yml
+  platform:
+    uses: ./.github/workflows/quality-multiuser.yml
+  readability:
+    name: Code readability
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ci/package-lock.json
+      - run: python -m pip install -r ci/requirements.lock
+      - run: ruff check src tests multiuser/src multiuser/tests ci
+      - run: ruff format --check src tests multiuser/src multiuser/tests ci
+      - run: npm ci --prefix ci
+      - run: npm run lint --prefix ci
+      - run: python -m pytest ci/tests --cov=ci --cov-config=ci/coverage.ini --cov-branch --cov-report=json:ci/reports/coverage.json --cov-report=term-missing
+      - run: python -c 'from pathlib import Path; from qa_job_bot.quality import check_coverage; print(check_coverage(Path("ci/reports/coverage.json")))'
+        env:
+          PYTHONPATH: multiuser/src
+      - run: mkdir -p ci/reports && radon cc src multiuser/src ci --json --show-complexity > ci/reports/complexity.json && radon mi src multiuser/src ci --json > ci/reports/maintainability.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: readability-reports
+          path: ci/reports/
+          retention-days: 7
+  security:
+    name: Security scans
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22'
+      - run: python -m pip install -r ci/requirements.lock
+      - run: mkdir -p ci/reports
+      - run: bandit -r src multiuser/src ci -x ci/tests -ll -iii --exit-zero -f json -o ci/reports/bandit.json
+      - run: python ci/results.py --bandit ci/reports/bandit.json
+      - run: pip-audit -r requirements.lock --no-deps --progress-spinner off -f json -o ci/reports/python-legacy-audit.json
+      - run: pip-audit -r multiuser/requirements.lock --no-deps --progress-spinner off -f json -o ci/reports/python-platform-audit.json
+      - run: pip-audit -r ci/requirements.lock --progress-spinner off -f json -o ci/reports/python-ci-audit.json
+      - run: npm audit --prefix frontend --audit-level=moderate
+      - run: npm audit --prefix multiuser/frontend --audit-level=moderate
+      - run: npm audit --prefix ci --audit-level=moderate
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: 'false'
+          GITLEAKS_VERSION: 8.30.1
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          version: v0.76.2
+          scan-type: config
+          trivyignores: ci/trivy-reviewed.yaml
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          skip-dirs: .git,ci/node_modules,frontend/node_modules,multiuser/frontend/node_modules
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: security-reports
+          path: ci/reports/
+          retention-days: 7
+  codeql:
+    name: CodeQL (${{ matrix.language }}, ${{ matrix.scope }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: python
+            scope: legacy
+            source: .
+            config: '{"paths-ignore":["multiuser"]}'
+          - language: python
+            scope: platform
+            source: multiuser
+            config: '{}'
+          - language: javascript-typescript
+            scope: web
+            source: .
+            config: '{}'
+          - language: actions
+            scope: pipelines
+            source: .
+            config: '{}'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea
+        with:
+          languages: ${{ matrix.language }}
+          source-root: ${{ matrix.source }}
+          config: ${{ matrix.config }}
+          build-mode: none
+          queries: security-and-quality
+      - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea
+        with:
+          output: ci/reports/codeql
+          category: /language:${{ matrix.language }}/scope:${{ matrix.scope }}
+          wait-for-processing: true
+      - run: python ci/results.py --sarif ci/reports/codeql
+  image:
+    name: ARM64 image
+    needs: [legacy, platform, readability, security, codeql]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: docker build -f multiuser/Dockerfile.runtime --label org.opencontainers.image.revision="$GITHUB_SHA" -t "job-searcher-runtime:$GITHUB_SHA" multiuser
+      - name: Verify document rendering in ARM64 image
+        run: docker run --rm --network none --mount "type=bind,source=$PWD/multiuser/tests,target=/tests,readonly" --tmpfs /tmp:rw,nosuid,size=256m "job-searcher-runtime:$GITHUB_SHA" python -m pytest /tests/test_document_files.py /tests/test_document_layout.py /tests/test_pdf_template.py -q -o addopts= -p no:cacheprovider
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          version: v0.76.2
+          image-ref: job-searcher-runtime:${{ github.sha }}
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          format: json
+          output: image-security.json
+      - run: mkdir -p release && docker save "job-searcher-runtime:$GITHUB_SHA" | gzip > release/runtime-image.tar.gz
+      - run: python ci/package_release.py "$GITHUB_SHA" release
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: production-release
+          path: release/
+          retention-days: 7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: image-security
+          path: image-security.json
+          retention-days: 7
+  gate:
+    name: CI gate
+    if: always()
+    needs: [legacy, platform, readability, security, codeql, image]
+    runs-on: ubuntu-24.04
+    steps:
+      - run: python -c 'import json,os; results=json.loads(os.environ["RESULTS"]); assert all(job["result"]=="success" for job in results.values()), results'
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+  deploy:
+    name: Deploy production
+    if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+    needs: [gate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    environment:
+      name: production
+      url: https://getcareer.app
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: production-release
+          path: release
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd
+        with:
+          role-to-assume: arn:aws:iam::577331852274:role/qa-job-searcher-github-deploy
+          role-session-name: github-${{ github.run_id }}
+          aws-region: eu-north-1
+          role-duration-seconds: 3600
+          allowed-account-ids: '577331852274'
+      - name: Deliver verified release
+        env:
+          AWS_REGION: eu-north-1
+          INSTANCE_ID: i-030fa1abecd9da0ac
+        run: |
+          set -euo pipefail
+          aws s3 cp release/ "s3://qa-job-searcher-577331852274-eu-north-1/artifacts/releases/$GITHUB_SHA/" --recursive --sse AES256 --only-show-errors
+          manifest_sha=$(sha256sum release/release.json | cut -d' ' -f1)
+          parameters=$(jq -n --arg commit "$GITHUB_SHA" --arg checksum "$manifest_sha" '{Commit:[$commit],ManifestSHA256:[$checksum]}')
+          command_id=$(aws ssm send-command --document-name qa-job-searcher-deploy --instance-ids "$INSTANCE_ID" --parameters "$parameters" --comment "Deploy $GITHUB_SHA" --query Command.CommandId --output text)
+          printf 'SSM command: %s\n' "$command_id" >> "$GITHUB_STEP_SUMMARY"
+          for attempt in $(seq 1 180); do
+            invocation=$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$INSTANCE_ID" --output json 2>/dev/null || true)
+            status=$(printf '%s' "$invocation" | jq -r '.Status // "Pending"')
+            case "$status" in
+              Success) printf '%s' "$invocation" | jq '{Status,StandardOutputContent}'; exit 0 ;;
+              Failed|Cancelled|TimedOut|Cancelling) printf '%s' "$invocation" | jq '{Status,StandardOutputContent,StandardErrorContent}'; exit 1 ;;
+            esac
+            sleep 10
+          done
+          printf 'Timed out waiting; inspect the existing SSM command before any retry.\n' >&2
+          exit 1
+      - name: Verify public HTTPS
+        run: |
+          python ci/verify_public.py

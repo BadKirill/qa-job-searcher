@@ -1,0 +1,59 @@
+{
+  "services": {
+    "postgres": {
+      "image": "postgres@sha256:846a7ddaa67a4b354ae1d21087b683901aa6113a4ed626d3787cfbf6c85e3e07"
+    },
+    "migrate": {
+      "image": "job-searcher-runtime:aws",
+      "pull_policy": "never"
+    },
+    "api": {
+      "image": "job-searcher-runtime:aws",
+      "pull_policy": "never",
+      "healthcheck": {
+        "timeout": "30s",
+        "interval": "60s"
+      }
+    },
+    "scheduler": {
+      "image": "job-searcher-runtime:aws",
+      "pull_policy": "never",
+      "healthcheck": {
+        "timeout": "30s",
+        "interval": "60s"
+      }
+    },
+    "search-worker": {
+      "image": "job-searcher-runtime:aws",
+      "pull_policy": "never",
+      "healthcheck": {
+        "timeout": "30s",
+        "interval": "60s"
+      }
+    },
+    "chat-worker": {
+      "image": "job-searcher-runtime:aws",
+      "pull_policy": "never",
+      "healthcheck": {
+        "timeout": "30s",
+        "interval": "60s"
+      }
+    },
+    "document-worker": {
+      "image": "job-searcher-runtime:aws",
+      "pull_policy": "never",
+      "healthcheck": {
+        "timeout": "30s",
+        "interval": "60s"
+      }
+    },
+    "maintenance": {
+      "image": "job-searcher-runtime:aws",
+      "pull_policy": "never"
+    },
+    "telegram": {
+      "image": "job-searcher-runtime:aws",
+      "pull_policy": "never"
+    }
+  }
+}
