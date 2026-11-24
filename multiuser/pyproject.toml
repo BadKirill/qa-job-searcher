@@ -23,9 +23,9 @@ dependencies = [
   "pillow>=13,<14",
   "cryptography>=50,<51",
   "langdetect==1.0.9",
-  "SQLAlchemy==2.0.46",
-  "psycopg[binary]==3.3.2",
-  "alembic==1.18.1",
+  "SQLAlchemy==2.1.9",
+  "psycopg[binary]==3.3.9",
+  "alembic==1.20.1",
 ]
 
 [project.optional-dependencies]
