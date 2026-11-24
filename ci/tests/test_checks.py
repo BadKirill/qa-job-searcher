@@ -111,9 +111,24 @@ def test_reliability_counts_first_attempts_without_rounding():
     ],
 )
 def test_reliability_cli_reports_history_and_only_fails_current_ci(
-    monkeypatch, tmp_path, capsys, status, conclusion, current_commit, fails
+    monkeypatch,
+    tmp_path,
+    capsys,
+    reliability_history_file,
+    status,
+    conclusion,
+    current_commit,
+    fails,
 ):
-    runs = [{"head_sha": "current", "status": status, "conclusion": conclusion}]
+    runs = [
+        {
+            "id": 1,
+            "created_at": "2026-11-24",
+            "head_sha": "current",
+            "status": status,
+            "conclusion": conclusion,
+        }
+    ]
     responses = iter([json.dumps({"workflow_runs": runs}), json.dumps({"sha": current_commit})])
     monkeypatch.setattr(
         reliability.subprocess, "check_output", lambda *args, **kwargs: next(responses)
@@ -130,13 +145,40 @@ def test_reliability_cli_reports_history_and_only_fails_current_ci(
     assert report["target_met"] == (conclusion == "success" and status == "completed")
 
 
+@pytest.fixture
+def reliability_history_file(monkeypatch, tmp_path):
+    path = tmp_path / "production-history.json"
+    path.write_text("[]")
+    monkeypatch.setattr(reliability, "HISTORY_FILE", path)
+    return path
+
+
 def test_reliability_preserves_failure_history_after_current_ci_succeeds(
-    monkeypatch, tmp_path, capsys
+    monkeypatch, tmp_path, capsys, reliability_history_file
 ):
     runs = [
-        {"head_sha": "current", "status": "completed", "conclusion": "success"},
-        {"head_sha": "old", "status": "completed", "conclusion": "failure"},
+        {
+            "id": 2,
+            "created_at": "2026-11-24",
+            "head_sha": "current",
+            "status": "completed",
+            "conclusion": "success",
+        },
     ]
+    reliability_history_file.write_text(
+        json.dumps(
+            [
+                {
+                    "id": 1,
+                    "created_at": "2026-11-23",
+                    "head_sha": "old",
+                    "status": "completed",
+                    "conclusion": "failure",
+                },
+                runs[0],
+            ]
+        )
+    )
     responses = iter([{"workflow_runs": runs}, {"sha": "current"}])
     monkeypatch.setattr(reliability, "fetch_json", lambda endpoint: next(responses))
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path / "summary.md"))
@@ -148,7 +190,9 @@ def test_reliability_preserves_failure_history_after_current_ci_succeeds(
     assert "::warning" in output
 
 
-def test_reliability_does_not_fabricate_an_empty_history(monkeypatch, tmp_path, capsys):
+def test_reliability_does_not_fabricate_an_empty_history(
+    monkeypatch, tmp_path, capsys, reliability_history_file
+):
     responses = iter([{"workflow_runs": []}, {"sha": "current"}])
     monkeypatch.setattr(reliability, "fetch_json", lambda endpoint: next(responses))
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path / "summary.md"))
@@ -158,6 +202,16 @@ def test_reliability_does_not_fabricate_an_empty_history(monkeypatch, tmp_path, 
     assert report["success_percent"] is None
     assert report["current_status"] == "not_run"
     assert report["target_met"] is False
+
+
+def test_reliability_prefers_live_attempts_and_orders_archived_history():
+    archived = [
+        {"id": 1, "created_at": "2026-11-23", "run_attempt": 1},
+        {"id": 2, "created_at": "2026-11-24", "run_attempt": 1},
+    ]
+    merged = reliability.merge_history([{**archived[0], "run_attempt": 2}], archived)
+    assert [run["id"] for run in merged] == [2, 1]
+    assert merged[1]["run_attempt"] == 2
 
 
 def test_release_manifest_pins_every_payload(monkeypatch, tmp_path):

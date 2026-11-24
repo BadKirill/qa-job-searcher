@@ -3,6 +3,14 @@ import os
 import subprocess
 from pathlib import Path
 
+HISTORY_FILE = Path(__file__).with_name("production_ci_history.json")
+
+
+def merge_history(runs, archived):
+    history = {run["id"]: run for run in archived}
+    history.update({run["id"]: run for run in runs})
+    return sorted(history.values(), key=lambda run: (run["created_at"], run["id"]), reverse=True)
+
 
 def summarize(runs):
     completed = [run for run in runs if run["status"] == "completed"][:100]
@@ -27,7 +35,7 @@ def main():
     )["workflow_runs"]
     commit = fetch_json("repos/BadKirill/qa-job-searcher/commits/master")["sha"]
     current = next((run for run in runs if run["head_sha"] == commit), {})
-    result = summarize(runs)
+    result = summarize(merge_history(runs, json.loads(HISTORY_FILE.read_text())))
     result.update(
         current_commit=commit,
         current_status=current.get("status", "not_run"),
