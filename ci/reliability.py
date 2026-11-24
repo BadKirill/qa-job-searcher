@@ -17,16 +17,24 @@ def summarize(runs):
     }
 
 
+def fetch_json(endpoint):
+    return json.loads(subprocess.check_output(["gh", "api", endpoint], text=True))
+
+
 def main():
-    raw = subprocess.check_output(
-        [
-            "gh",
-            "api",
-            "repos/BadKirill/qa-job-searcher/actions/workflows/ci.yml/runs?branch=master&event=push&per_page=100",
-        ],
-        text=True,
+    runs = fetch_json(
+        "repos/BadKirill/qa-job-searcher/actions/workflows/ci.yml/runs?branch=master&event=push&per_page=100"
+    )["workflow_runs"]
+    commit = fetch_json("repos/BadKirill/qa-job-searcher/commits/master")["sha"]
+    current = next((run for run in runs if run["head_sha"] == commit), {})
+    result = summarize(runs)
+    result.update(
+        current_commit=commit,
+        current_status=current.get("status", "not_run"),
+        current_conclusion=current.get("conclusion"),
+        target_met=result["success_percent"] is not None
+        and result["success_percent"] >= result["target_percent"],
     )
-    result = summarize(json.loads(raw)["workflow_runs"])
     print(json.dumps(result))
     Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(
         "## CI first-attempt reliability\n\n"
@@ -35,10 +43,17 @@ def main():
         "A small sample does not establish future reliability.\n\n"
         "This is a historical CI target, not a production availability check. "
         "Past failures remain in the window after fixes and successful deployments. "
-        "Inspect the latest CI run and production checks separately.\n"
+        "Historical target breaches are reported as warnings without repeated failure emails. "
+        "Only a failed completed CI run for the current master commit fails this report.\n"
     )
     if result["success_percent"] is not None and result["success_percent"] < 99:
-        raise SystemExit("CI reliability below 99%; investigate first-attempt failures")
+        print(
+            "::warning title=Historical CI target below 99%::"
+            f"First-attempt reliability is {result['success_percent']:.2f}%; "
+            "previous failures remain counted. This is not a new CI failure."
+        )
+    if current.get("status") == "completed" and current.get("conclusion") != "success":
+        raise SystemExit("Latest CI for the current master commit is not successful")
 
 
 if __name__ == "__main__":
