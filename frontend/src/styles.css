@@ -294,23 +294,19 @@ small {
   z-index: 5;
 }
 .brand {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  font-size: 13px;
-  font-weight: 550;
-  letter-spacing: -0.4px;
+  display: block;
+  width: fit-content;
   white-space: nowrap;
 }
 .brand-mark {
   font-family: "Manrope", sans-serif;
-  font-size: 36px;
+  font-size: 32px;
   font-weight: 800;
-  letter-spacing: -3px;
+  letter-spacing: -1.2px;
   line-height: 1;
 }
 .brand-mark > span {
-  color: #85a26e;
+  color: var(--accent);
 }
 .sidebar .brand {
   margin: 2px 14px 53px;
@@ -1324,9 +1320,6 @@ small {
   justify-content: space-between;
   gap: 70px;
 }
-.login-intro > .brand {
-  font-size: 15px;
-}
 .login-intro .eyebrow {
   font-size: 9px;
   color: #7f906e;
@@ -1471,13 +1464,11 @@ small {
     padding: 25px 12px 20px;
   }
   .sidebar .brand {
-    gap: 7px;
     margin-left: 10px;
     margin-bottom: 40px;
-    font-size: 11px;
   }
   .brand-mark {
-    font-size: 31px;
+    font-size: 28px;
   }
   .workspace-label {
     font-size: 7px;
@@ -1619,7 +1610,6 @@ small {
   }
   .sidebar .brand {
     margin: 0 0 20px;
-    font-size: 11px;
   }
   .brand-mark {
     font-size: 30px;

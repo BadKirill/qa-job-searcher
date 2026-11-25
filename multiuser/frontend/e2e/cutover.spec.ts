@@ -73,6 +73,8 @@ test("maintenance, verified import and two-account pilot preserve history and re
   expect(control.schema).toMatch(/^qa_test_[a-f0-9]+$/);
   expect(control.data_dir).toMatch(/qa-web-e2e-[^/]+\/restored$/);
   await page.goto("/");
+  await expect(page).toHaveTitle("getCareer · Поиск работы");
+  await expect(page.getByRole("link", { name: "getCareer", exact: true })).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Плановое обслуживание" }),
   ).toBeVisible();

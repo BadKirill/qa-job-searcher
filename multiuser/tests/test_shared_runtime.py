@@ -133,6 +133,20 @@ def test_expired_search_reclaims_with_new_execution_and_old_worker_cannot_publis
     assert pg_store.finish_task(second["id"], "new", "ready")
 
 
+def test_exhausted_search_retry_reports_an_interrupted_search_in_history(pg_store):
+    ready(pg_store)
+    configure(pg_store)
+    task = pg_store.enqueue_search("interrupted-search")
+    queue = QueueRepository(pg_store.database)
+    for attempt in range(1, 4):
+        run_task = queue.claim(f"worker-{attempt}", lease_seconds=-1, lane="search")
+        assert run_task["id"] == task["id"] and run_task["attempts"] == attempt
+    assert queue.claim("late-worker", lane="search") is None
+    run = pg_store.search_run(task["id"])
+    assert run["state"] == "failed"
+    assert run["task_error"] == "Поиск прервался. Запустите его ещё раз."
+
+
 def test_paid_task_is_not_blindly_restarted_and_expired_reservation_stays_charged(pg_store):
     context = claimed(pg_store, "cv")
     limits = RuntimeLimits(pg_store.database)

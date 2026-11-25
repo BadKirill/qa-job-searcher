@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { App } from "../src/App";
@@ -15,6 +16,12 @@ import {
 } from "../src/SearchSettings";
 import { server } from "./fixtures";
 
+const examples = {
+  developer: { ...emptySearch, role_keywords: ["backend engineer"] },
+  designer: { ...emptySearch, role_keywords: ["product designer", "ux designer"] },
+  qa: { ...emptySearch, role_keywords: ["qa engineer"], qa_title_fallback: true },
+};
+
 function preferencesServer(initial?: Partial<Preferences>) {
   let state: Preferences = {
     search_profile: { configured: false, version: 0, profile: null },
@@ -24,6 +31,7 @@ function preferencesServer(initial?: Partial<Preferences>) {
   const base = server();
   const calls: { path: string; body: any }[] = [];
   const failures: string[] = [];
+  const versions: NonNullable<Preferences["search_profile"]["profile"]>[] = [];
   let check = {
     status: "ok",
     items: 2,
@@ -68,30 +76,33 @@ function preferencesServer(initial?: Partial<Preferences>) {
         })),
       };
     else if (path === "/api/search-presets")
-      data = {
-        items: {
-          developer: emptySearch,
-          designer: emptySearch,
-          qa: emptySearch,
-        },
-      };
+      data = { items: examples };
     else if (path.includes("/apply")) {
+      const id = path.split("/")[3] as keyof typeof examples;
+      versions.push(examples[id]);
       state = {
         ...state,
         search_profile: {
           version: state.search_profile.version + 1,
           configured: true,
-          profile: { ...emptySearch, role_keywords: ["backend engineer"] },
+          profile: examples[id],
         },
       };
       data = state;
     } else if (path === "/api/search-profile") {
+      versions.push(body.profile);
       state.search_profile = {
         configured: true,
         version: state.search_profile.version + 1,
         profile: body.profile,
       };
       data = state.search_profile;
+    } else if (path === "/api/search-profile/history") {
+      data = { items: versions.map((profile, index) => ({
+        profile,
+        version: index + 1,
+        active: index === versions.length - 1,
+      })) };
     } else if (path === "/api/sources" && !body) data = state.sources;
     else if (path.endsWith("/check")) data = check;
     else {
@@ -205,21 +216,88 @@ test("fresh personal workspace has no inherited settings and saves a universal p
 test("presets require explicit application and load a versioned saved profile", async () => {
   const api = preferencesServer();
   const user = userEvent.setup();
-  render(<SearchSettings />);
+  const { unmount } = render(<SearchSettings />);
   await ready();
   expect(api.calls.some((call) => call.path.includes("apply"))).toBe(false);
+  expect(screen.getByLabelText("Пример профиля")).toHaveValue("");
+  expect(screen.getByRole("button", { name: "Применить пример" })).toBeDisabled();
+  expect(screen.getByLabelText("Запросы к агрегаторам (до 8)")).toHaveAccessibleDescription(
+    "(если пусто, используются первые 8 названий ролей)",
+  );
   await user.selectOptions(screen.getByLabelText("Пример профиля"), "designer");
   await user.click(screen.getByRole("button", { name: "Применить пример" }));
   expect(await screen.findByText(/Пример применён/)).toBeVisible();
   expect(screen.getByLabelText("Названия ролей и синонимы")).toHaveValue(
-    "backend engineer",
+    "product designer, ux designer",
   );
   expect(api.calls.find((call) => call.path.includes("apply"))?.body).toEqual({
     expected_version: 0,
     expected_sources_version: 0,
   });
+  unmount();
+  render(<SearchSettings />);
+  await ready();
+  expect(screen.getByLabelText("Пример профиля")).toHaveValue("designer");
+  const roles = screen.getByLabelText("Названия ролей и синонимы");
+  await user.clear(roles);
+  await user.type(roles, "brand designer");
+  await user.click(screen.getByRole("button", { name: "Сохранить профиль поиска" }));
+  await screen.findByText("Профиль поиска сохранён.");
+  expect(screen.getByLabelText("Пример профиля")).toHaveValue("");
+
+  api.failures.push("/api/search-profile/history");
+  await user.click(screen.getByText("История версий профиля"));
+  await user.click(await screen.findByRole("button", { name: "Повторить загрузку версий" }));
+  expect(api.calls.filter((call) => call.path === "/api/search-profile")).toHaveLength(1);
+  const current = await screen.findByText("Версия 2 · используется в поиске");
+  const previous = screen.getByText("Версия 1");
+  await user.click(previous);
+  expect(within(previous.closest("details")!).getByText("product designer, ux designer")).toBeVisible();
+  await user.click(current);
+  expect(within(current.closest("details")!).getByText("brand designer")).toBeVisible();
 });
 
+test("new accounts have an empty profile history", async () => {
+  const api = preferencesServer();
+  render(<SearchSettings />);
+  await ready();
+  expect(api.calls.some((call) => call.path.endsWith("/history"))).toBe(false);
+  await userEvent.click(screen.getByText("История версий профиля"));
+  expect(await screen.findByText("Сохранённых версий пока нет.")).toBeVisible();
+});
+
+test("already connected sources are flagged before sending a duplicate mutation", async () => {
+  const api = preferencesServer({
+    sources: {
+      version: 1,
+      items: [
+        source(),
+        source({ id: "agg", kind: "remotive", name: "Remotive", config: {}, enabled: false }),
+        source({ id: "channel", kind: "telegram", name: "Telegram", config: { handle: "Jobs_Channel" } }),
+      ],
+    },
+  });
+  const user = userEvent.setup();
+  render(<SearchSettings />);
+  await ready();
+  const type = screen.getByLabelText("Тип источника");
+  const submit = screen.getByRole("button", { name: "Добавить источник" });
+  expect(screen.getByRole("option", { name: "remotive · уже подключён" })).toBeDisabled();
+  expect(submit).toBeDisabled();
+  await user.selectOptions(type, "lever");
+  const board = screen.getByLabelText("Идентификатор доски");
+  await user.type(board, "ACME");
+  expect(submit).toBeEnabled();
+  await user.selectOptions(screen.getByLabelText("Регион API"), "eu");
+  expect(submit).toBeDisabled();
+  expect(screen.getByText(/Мои источники» как «My board»/)).toBeVisible();
+  await user.selectOptions(type, "telegram");
+  const channel = screen.getByLabelText("Handle публичного канала");
+  await user.clear(channel);
+  await user.type(channel, "@jobs_channel");
+  expect(submit).toBeDisabled();
+  expect(api.calls.some((call) => call.path === "/api/sources" && call.body)).toBe(false);
+});
 test("board, channel and aggregator connections are editable without discarding profile edits", async () => {
   const api = preferencesServer();
   const user = userEvent.setup();

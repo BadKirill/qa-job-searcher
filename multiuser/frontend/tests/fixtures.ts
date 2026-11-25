@@ -248,7 +248,7 @@ export function server() {
         job.documents = job.documents.filter((task) => task.id !== taskId);
       return new Response(null, { status: 204 });
     } else if (path === "/search-runs") {
-      const task = makeTask({ kind: "search" });
+      const task = makeTask({ id: `search-${state.tasks.length + 1}`, kind: "search" });
       state.tasks.push(task);
       data = task;
     } else if (path === "/template-drafts") {

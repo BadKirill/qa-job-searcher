@@ -395,19 +395,15 @@ small {
   z-index: 5;
 }
 .brand {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  font-size: 13px;
-  font-weight: 550;
-  letter-spacing: -0.4px;
+  display: block;
+  width: fit-content;
   white-space: nowrap;
 }
 .brand-mark {
   font-family: "Manrope", sans-serif;
-  font-size: 36px;
+  font-size: 32px;
   font-weight: 800;
-  letter-spacing: -3px;
+  letter-spacing: -1.2px;
   line-height: 1;
 }
 .brand-mark > span {
@@ -1005,9 +1001,6 @@ small {
 .download-link:hover {
   text-decoration: underline;
 }
-.background-tasks:not(:empty) {
-  margin-top: 20px;
-}
 .pagination {
   display: flex;
   justify-content: space-between;
@@ -1454,9 +1447,6 @@ small {
   justify-content: space-between;
   gap: 70px;
 }
-.login-intro > .brand {
-  font-size: 15px;
-}
 .login-intro .eyebrow {
   font-size: 9px;
   color: var(--muted);
@@ -1601,13 +1591,11 @@ small {
     padding: 25px 12px 20px;
   }
   .sidebar .brand {
-    gap: 7px;
     margin-left: 10px;
     margin-bottom: 40px;
-    font-size: 11px;
   }
   .brand-mark {
-    font-size: 31px;
+    font-size: 28px;
   }
   .workspace-label {
     font-size: 7px;
@@ -1749,7 +1737,6 @@ small {
   }
   .sidebar .brand {
     margin: 0 0 20px;
-    font-size: 11px;
   }
   .brand-mark {
     font-size: 30px;
@@ -2337,6 +2324,51 @@ small {
   max-width: 100%;
   font-size: 14px;
 }
+.search-settings .settings-select {
+  position: relative;
+}
+.search-settings .settings-select select {
+  appearance: none;
+  padding-inline-end: 40px;
+}
+.search-settings .settings-select::after {
+  content: "";
+  position: absolute;
+  inset-inline-end: 16px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-inline-end: 2px solid currentColor;
+  border-block-end: 2px solid currentColor;
+  color: var(--muted);
+  transform: translateY(-70%) rotate(45deg);
+  pointer-events: none;
+}
+.search-settings .field-hint {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.search-settings label .field-hint {
+  display: block;
+}
+.search-settings .profile-history {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 8px 14px;
+}
+.search-settings .profile-versions dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  gap: 10px 18px;
+  margin: 8px 0 16px;
+}
+.search-settings .profile-versions dt {
+  font-weight: 600;
+}
+.search-settings .profile-versions dd {
+  margin: 0;
+}
 .search-settings .checkbox-row,
 .account-settings label:has(> input[type="checkbox"]),
 .runtime-settings label:has(> input[type="checkbox"]) {
@@ -2755,8 +2787,8 @@ input[type="checkbox"] {
     height: auto;
     overflow: visible;
   }
-  .sidebar .brand > span:last-child {
-    display: none;
+  .sidebar .brand-mark {
+    font-size: clamp(23px, 7vw, 30px);
   }
   .nav-item {
     min-height: 44px;
@@ -2879,7 +2911,7 @@ input[type="checkbox"] {
 }
 .account-settings label > input:not([type="checkbox"]),
 .search-settings label > input:not([type="checkbox"]),
-.search-settings label > select,
+.search-settings label > .settings-select,
 .runtime-settings label > input:not([type="checkbox"]) {
   margin-top: auto;
 }

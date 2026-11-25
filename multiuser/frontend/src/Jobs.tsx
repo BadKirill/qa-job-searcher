@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { errorMessage, isPending, request, requestId, safeJobUrl } from "./api";
 import { SearchHistory, SearchRunSummary } from "./SearchHistory";
 import { Chat } from "./Chat";
@@ -10,6 +10,7 @@ import {
   TaskStatus,
 } from "./components";
 import type { Job, JobPage, Task } from "./types";
+import { useRefreshEffect } from "./useRefreshEffect";
 
 export function JobCard({
   snapshotId,
@@ -401,54 +402,51 @@ export function Jobs({
 }) {
   const [page, setPage] = useState(1);
   const [run, setRun] = useState("");
-  const [snapshot, setSnapshot] = useState("");
+  const snapshot = useRef("");
   const [result, setResult] = useState<JobPage | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
-  const [searchNotice, setSearchNotice] = useState(false);
+  const [startedSearch, setStartedSearch] = useState<Task | null>(null);
   const [undo, setUndo] = useState(false);
 
-  useEffect(() => {
-    const controller = new AbortController();
+  const loadJobs = useCallback(async (signal: AbortSignal) => {
     setLoading(true);
     const query = new URLSearchParams({
       tab,
       page: String(page),
       page_size: "10",
     });
-    if (snapshot) query.set("snapshot_id", snapshot);
+    if (snapshot.current) query.set("snapshot_id", snapshot.current);
     if (run) query.set("run_id", run);
-    request<JobPage>(`/jobs?${query}`, { signal: controller.signal })
-      .then((data) => {
-        if (controller.signal.aborted) return;
-        setError("");
-        if (data.pages > 0 && page > data.pages) {
-          setPage(data.pages);
-          return;
-        }
-        setResult(data);
-        setSnapshot(data.snapshot_id);
-      })
-      .catch((failure) => {
-        if (!controller.signal.aborted) setError(errorMessage(failure));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [tab, page, snapshot, run, refresh, revision]);
+    try {
+      const data = await request<JobPage>(`/jobs?${query}`, { signal });
+      if (signal.aborted) return;
+      setError("");
+      if (data.pages > 0 && page > data.pages) {
+        setPage(data.pages);
+        return;
+      }
+      setResult(data);
+      snapshot.current = data.snapshot_id;
+    } catch (failure) {
+      if (!signal.aborted) setError(errorMessage(failure));
+    } finally {
+      if (!signal.aborted) setLoading(false);
+    }
+  }, [tab, page, run, refresh]);
+  useRefreshEffect(loadJobs, revision);
 
   async function search() {
     setSearching(true);
     setError("");
     try {
-      await request("/search-runs", {
+      const task = await request<Task>("/search-runs", {
         method: "POST",
         body: { request_id: requestId() },
       });
-      setSearchNotice(true);
+      setStartedSearch(task);
       onTask();
     } catch (failure) {
       setError(errorMessage(failure));
@@ -462,14 +460,15 @@ export function Jobs({
   }
   function fresh() {
     setRun("");
-    setSnapshot("");
+    snapshot.current = "";
     setPage(1);
     setRefresh((value) => value + 1);
-    setSearchNotice(false);
+    setStartedSearch(null);
   }
+  const currentSearch = tasks.find((task) => task.id === startedSearch?.id) ?? startedSearch;
   const searchTask = tasks.find(
     (task) => task.kind === "search" && isPending(task.status),
-  );
+  ) ?? (currentSearch && isPending(currentSearch.status) ? currentSearch : null);
   const headings = {
     active: {
       eyebrow: "ВАШ СЛЕДУЮЩИЙ ШАГ",
@@ -543,9 +542,21 @@ export function Jobs({
           </button>
         </Notice>
       )}
-      {searchNotice && (
+      {tab === "active" && !currentSearch && searchTask && <TaskStatus task={searchTask} />}
+      {tab === "active" && currentSearch?.status === "failed" && (
+        <Notice onClose={() => setStartedSearch(null)}>
+          {currentSearch.error || "Не удалось завершить поиск. Попробуйте запустить его ещё раз."}
+        </Notice>
+      )}
+      {tab === "active" && currentSearch?.status === "cancelled" && (
+        <Notice tone="info" onClose={() => setStartedSearch(null)}>Поиск отменён.</Notice>
+      )}
+      {tab === "active" && currentSearch &&
+        (isPending(currentSearch.status) || currentSearch.status === "ready") && (
         <Notice tone="info">
-          Поиск запущен. Новые результаты появятся после завершения.
+          {currentSearch.status === "ready"
+            ? "Поиск завершён."
+            : "Поиск запущен. Новые результаты появятся после завершения."}
           <button className="text-button" onClick={fresh}>
             Показать свежую выдачу <span aria-hidden="true">→</span>
           </button>
@@ -674,9 +685,9 @@ export function Jobs({
           revision={revision + refresh}
           onSelect={(id) => {
             setRun(id);
-            setSnapshot("");
+            snapshot.current = "";
             setPage(1);
-            setSearchNotice(false);
+            setStartedSearch(null);
           }}
         />
       )}

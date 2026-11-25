@@ -35,6 +35,11 @@ class QueueRepository:
                 and row["payload"].get("search_inputs")
                 and row["attempts"] < 3
             )
+            interrupted = (
+                "Поиск прервался. Запустите его ещё раз."
+                if row["kind"] == "search"
+                else "Исполнение прервано. Исход API может быть неизвестен. Повторите задание."
+            )
             connection.execute(
                 s.tasks.update()
                 .where(s.tasks.c.id == row["id"])
@@ -42,9 +47,7 @@ class QueueRepository:
                     status="queued" if retry else "failed",
                     worker_id=None,
                     lease_until=None,
-                    error=None
-                    if retry
-                    else "Исполнение прервано. Исход API может быть неизвестен. Повторите задание.",
+                    error=None if retry else interrupted,
                 )
             )
             touch_owner(connection, row["user_id"])

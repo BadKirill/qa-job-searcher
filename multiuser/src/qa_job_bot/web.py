@@ -323,7 +323,9 @@ def create_app(
             response = JSONResponse({"detail": error.detail}, status_code=error.status)
         response.headers.update(
             {
-                "Cache-Control": "no-store",
+                "Cache-Control": "no-store, no-transform"
+                if response.headers.get("content-type", "").startswith("text/html")
+                else "no-store",
                 "X-Content-Type-Options": "nosniff",
                 "Referrer-Policy": "no-referrer",
                 "X-Frame-Options": "DENY",

@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import { errorMessage, request, withCredentialChange } from "./api";
-import { Icon, Notice } from "./components";
+import { Brand, Icon, Notice } from "./components";
 import type { Session } from "./types";
 
 export function Login({
@@ -79,12 +79,7 @@ export function Login({
   return (
     <main className="login-screen">
       <div className="login-intro">
-        <a className="brand" href="/" aria-label="Job Searcher">
-          <span className="brand-mark">
-            job<span>.</span>
-          </span>
-          <span>job searcher</span>
-        </a>
+        <Brand />
         <div>
           <p className="eyebrow">МЕНЬШЕ ПОИСКА. БОЛЬШЕ ВОЗМОЖНОСТЕЙ.</p>
           <h1>

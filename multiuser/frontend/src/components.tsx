@@ -2,6 +2,16 @@ import { useState, type ReactNode } from "react";
 import { errorMessage, isPending, request, taskLabel } from "./api";
 import type { DocumentPreview, Task } from "./types";
 
+export function Brand() {
+  return (
+    <a className="brand" href="/" aria-label="getCareer">
+      <span className="brand-mark">
+        get<span>Career</span>
+      </span>
+    </a>
+  );
+}
+
 export function formatCreatedAt(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Время создания неизвестно";

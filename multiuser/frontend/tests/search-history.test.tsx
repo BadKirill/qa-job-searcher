@@ -268,8 +268,8 @@ test("a late aborted listing response cannot replace the current snapshot", asyn
     }
     return api.fetcher(url, options);
   });
-  const view = render(<Jobs tab="active" {...props} />);
-  view.rerender(<Jobs tab="active" {...props} revision={1} />);
+  const view = render(<Jobs tab="archive" {...props} />);
+  view.rerender(<Jobs tab="active" {...props} />);
   expect(
     await screen.findByRole("article", { name: "New personal result" }),
   ).toBeVisible();

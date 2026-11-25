@@ -85,7 +85,7 @@ it("shows invalid sources and confirmed CV until setup is complete, then removes
   expect(
     screen.getByText("Эталон подтверждён: Own CV.docx"),
   ).toBeInTheDocument();
-  expect(screen.getByText("Критерии сохранены · версия 4")).toBeInTheDocument();
+  expect(screen.getByText("Критерии поиска сохранены")).toBeInTheDocument();
   data = { ...data, setup: { ...data.setup, valid_sources: 2 } };
   rerender(<WorkspaceStatus revision={1} onNavigate={vi.fn()} />);
   await waitFor(() =>
@@ -115,7 +115,7 @@ it("reports load failure and retries without fabricating readiness", async () =>
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
 
-it("rejects an old readiness response after another revision has loaded", async () => {
+it("loads the new readiness revision after the pending response completes", async () => {
   let finish!: (response: Response) => void;
   const fetcher = vi
     .fn()
@@ -131,7 +131,7 @@ it("rejects an old readiness response after another revision has loaded", async 
     <WorkspaceStatus revision={0} onNavigate={vi.fn()} />,
   );
   rerender(<WorkspaceStatus revision={1} onNavigate={vi.fn()} />);
-  await screen.findByLabelText("Личная очередь");
+  expect(fetcher).toHaveBeenCalledTimes(1);
   await act(async () =>
     finish(
       new Response(
@@ -141,6 +141,7 @@ it("rejects an old readiness response after another revision has loaded", async 
       ),
     ),
   );
+  expect(fetcher).toHaveBeenCalledTimes(2);
   expect(screen.getByLabelText("Личная очередь")).not.toHaveTextContent("999");
 });
 
@@ -185,7 +186,7 @@ it("keeps unsaved search criteria while switching separate pages and only shows 
   expect(
     screen.getByRole("heading", { name: "Источники" }),
   ).toBeInTheDocument();
-  expect(screen.getByText("Мои источники · версия 3")).toBeInTheDocument();
+  expect(screen.getByText("Мои источники")).toBeInTheDocument();
   expect(
     screen.queryByLabelText("Названия ролей и синонимы"),
   ).not.toBeInTheDocument();
@@ -336,14 +337,16 @@ it("updates the displayed user name without changing the account and preserves a
   expect(screen.getByLabelText("Личный аккаунт")).toHaveTextContent("D");
 });
 
-it("ignores a stale profile response within the same account and closed SSE callbacks", async () => {
+it("coalesces live updates while a profile response is pending and ignores closed SSE callbacks", async () => {
   const backend = server();
   const original = globalThis.fetch;
   let finish!: (response: Response) => void;
+  let firstSignal: AbortSignal | null | undefined;
   let first = true;
   vi.stubGlobal("fetch", (path: string, options: RequestInit) => {
     if (path === "/api/profile" && first) {
       first = false;
+      firstSignal = options.signal;
       return new Promise<Response>((resolve) => {
         finish = resolve;
       });
@@ -353,16 +356,24 @@ it("ignores a stale profile response within the same account and closed SSE call
   const mounted = render(<Workspace user={member} onLogout={vi.fn()} />);
   await screen.findByRole("button", { name: "Аккаунт и доступ" });
   const events = TestEvents.latest;
+  const countBefore = backend.calls.length;
+  const before = backend.calls.filter((call) => call.path === "/profile").length;
+  await act(async () => events.onopen?.());
+  expect(backend.calls).toHaveLength(countBefore);
   backend.state.profile.active!.filename = "Confirmed new CV.docx";
   await act(async () => events.change?.());
+  await act(async () => events.change?.());
+  expect(firstSignal?.aborted).toBe(false);
+  expect(backend.calls.filter((call) => call.path === "/profile")).toHaveLength(before);
   await userEvent.click(
     screen.getByRole("button", { name: "Профиль и шаблон" }),
   );
-  await screen.findByText("Confirmed new CV.docx");
   const old = structuredClone(backend.state.profile);
   old.active!.filename = "Stale private CV.docx";
   await act(async () => finish(new Response(JSON.stringify(old))));
+  await screen.findByText("Confirmed new CV.docx");
   expect(screen.queryByText("Stale private CV.docx")).not.toBeInTheDocument();
+  expect(backend.calls.filter((call) => call.path === "/profile")).toHaveLength(before + 1);
   mounted.unmount();
   const count = backend.calls.length;
   await act(async () => {

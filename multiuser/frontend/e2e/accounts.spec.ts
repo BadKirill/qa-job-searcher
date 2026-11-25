@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Request } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -121,6 +121,77 @@ async function accept(page: Page, token: string) {
   ).toBeVisible();
 }
 
+test("a saved design example survives reload and previous criteria remain visible", async ({ page, browser }) => {
+  await signIn(page);
+  const invitation = await invite(page, "profile-version-designer");
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  try {
+    const member = await context.newPage();
+    await accept(member, invitation.token);
+    const openCriteria = () => member.getByRole("button", { name: "Настроить критерии" }).click();
+    await openCriteria();
+    const examples = member.getByLabel("Пример профиля", { exact: true });
+    await expect(examples).toHaveValue("");
+    await examples.selectOption("designer");
+    await member.getByRole("button", { name: "Применить пример" }).click();
+    await expect(member.getByText("Пример применён. Критерии сохранены в вашем аккаунте.")).toBeVisible();
+    const startupReads = ["/api/profile", "/api/jobs", "/api/tasks", "/api/workspace"];
+    const startupPaths = new Set([...startupReads, "/api/events"]);
+    const startupRequests = new Set<Request>();
+    const failures: string[] = [];
+    let reloaded = false;
+    const markReload = () => {
+      reloaded = true;
+    };
+    const recordRequest = (request: Request) => {
+      if (reloaded && startupPaths.has(new URL(request.url()).pathname)) {
+        startupRequests.add(request);
+      }
+    };
+    const recordFailure = (request: Request) => {
+      if (startupRequests.has(request)) failures.push(new URL(request.url()).pathname);
+    };
+    member.once("framenavigated", markReload);
+    member.on("request", recordRequest);
+    member.on("requestfailed", recordFailure);
+    const startupResponses = [...startupPaths].map((path) =>
+      member.waitForResponse((response) =>
+        startupRequests.has(response.request()) &&
+        new URL(response.url()).pathname === path && response.ok(),
+      ),
+    );
+    await member.reload();
+    await Promise.all(startupResponses);
+    expect(failures).toEqual([]);
+    member.off("request", recordRequest);
+    member.off("requestfailed", recordFailure);
+    await expect(member.getByText("Критерии поиска сохранены")).toBeVisible();
+    await openCriteria();
+    await expect(examples).toHaveValue("designer");
+    await expect(examples).toHaveCSS("appearance", "none");
+    await expect(examples).toHaveCSS("padding-right", "40px");
+    const roles = member.getByLabel("Названия ролей и синонимы");
+    await expect(roles).toHaveValue("product designer, ux designer");
+    const queries = member.getByLabel("Запросы к агрегаторам (до 8)");
+    await expect(queries).toHaveValue("");
+    await expect(queries).toHaveAccessibleDescription("(если пусто, используются первые 8 названий ролей)");
+    await roles.fill("brand designer");
+    await member.getByRole("button", { name: "Сохранить профиль поиска" }).click();
+    await expect(member.getByText("Профиль поиска сохранён.")).toBeVisible();
+    await expect(examples).toHaveValue("");
+    await member.getByText("История версий профиля", { exact: true }).click();
+    await member.getByText("Версия 1", { exact: true }).click();
+    await expect(member.getByText("product designer, ux designer", { exact: true })).toBeVisible();
+    await member.getByText("Версия 2 · используется в поиске", { exact: true }).click();
+    await expect(member.getByText("brand designer", { exact: true })).toBeVisible();
+    await member.getByRole("button", { name: "Источники", exact: true }).click();
+    await expect(member.getByRole("option", { name: "Remotive · уже подключён" })).toBeDisabled();
+    await expect(member.getByRole("button", { name: "Добавить источник", exact: true })).toBeDisabled();
+  } finally {
+    await context.close();
+  }
+});
+
 function pythonBytes(script: string, input?: Buffer) {
   return execFileSync(
     process.env.QA_E2E_PYTHON || "../.venv/bin/python",
@@ -204,7 +275,7 @@ test("two professions generate independent documents, revise their own chats and
         .click();
       await expect(
         person.page.getByText(
-          "Пример применён. Проверьте критерии перед поиском.",
+          "Пример применён. Критерии сохранены в вашем аккаунте.",
         ),
       ).toBeVisible();
       await activatePersonalCV(person.page, person.name, person.experience);
@@ -375,7 +446,7 @@ test("two invited accounts keep independent workspaces, files and sessions on on
         .click();
       await expect(
         memberPage.getByText(
-          "Пример применён. Проверьте критерии перед поиском.",
+          "Пример применён. Критерии сохранены в вашем аккаунте.",
         ),
       ).toBeVisible();
       await memberPage
@@ -1494,6 +1565,11 @@ test("layout stays aligned across workspace pages and viewport sizes", async ({ 
     await member.reload();
     await context.route("https://example.com/**", (route) => route.fulfill({ body: "Synthetic vacancy" }));
     await login.goto(origin);
+    await expect(login).toHaveTitle("getCareer · Поиск работы");
+    await expect(member).toHaveTitle("getCareer · Поиск работы");
+    await expect(member.locator(".main-footer").getByText("getCareer", { exact: true })).toBeVisible();
+    const memberBrand = member.getByRole("link", { name: "getCareer", exact: true });
+    const loginBrand = login.getByRole("link", { name: "getCareer", exact: true });
     const widths = [320, 360, 390, 620, 621, 768, 800, 801, 900, 1024, 1150, 1151, 1440, 1920];
     async function contained(target: Page) {
       await expectReadableColors(target);
@@ -1522,6 +1598,13 @@ test("layout stays aligned across workspace pages and viewport sizes", async ({ 
       await member.setViewportSize({ width, height: 960 });
       await login.setViewportSize({ width, height: 960 });
       await expect(member.getByRole("heading", { name: "Подготовьте личный кабинет" })).toBeVisible();
+      await expect(memberBrand).toBeVisible();
+      await expect(loginBrand).toBeVisible();
+      if (width <= 620) {
+        const brand = await memberBrand.boundingBox();
+        const account = await member.locator(".topbar-account").boundingBox();
+        expect(brand!.x + brand!.width).toBeLessThan(account!.x);
+      }
       await contained(member);
       await contained(login);
       const passwordField = login.getByLabel("Пароль", { exact: true });

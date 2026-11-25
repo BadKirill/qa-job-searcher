@@ -224,6 +224,7 @@ it("reports event disconnection and resynchronizes on reconnect, messages and fa
   );
   const before = backend.calls.length;
   act(() => TestEvents.latest.onopen?.());
+  act(() => TestEvents.latest.change?.());
   await waitFor(() => expect(backend.calls.length).toBeGreaterThan(before));
   expect(
     screen.queryByText(/Связь с обновлениями потеряна/),
@@ -336,13 +337,22 @@ it("disables duplicate form submissions until authentication completes", async (
   expect(loggedIn).toHaveBeenCalledOnce();
 });
 
-it("shows search failure details and navigates directly to profile from sidebar", async () => {
+it("shows a new search failure beside the search controls without resurfacing older errors", async () => {
   const backend = server();
   backend.state.tasks = [
-    makeTask({ kind: "search", status: "failed", error: "Search timeout" }),
+    makeTask({ kind: "search", status: "failed", error: "Previous search timeout" }),
   ];
   render(<Workspace onLogout={vi.fn()} />);
-  await screen.findByText("Search timeout");
+  await screen.findByText(/11 вакансий/);
+  expect(screen.queryByText("Previous search timeout")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Обновить поиск" }));
+  await screen.findByText(/Поиск запущен/);
+  backend.state.tasks[1] = { ...backend.state.tasks[1], status: "failed", error: "Search timeout" };
+  act(() => TestEvents.latest.change?.());
+  expect(await screen.findByRole("alert")).toHaveTextContent("Search timeout");
+  expect(screen.queryByText(/Поиск запущен/)).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Закрыть уведомление" }));
+  expect(screen.queryByText("Search timeout")).not.toBeInTheDocument();
   await userEvent.click(
     screen.getByRole("button", { name: "Изменить эталонный шаблон" }),
   );
@@ -351,6 +361,21 @@ it("shows search failure details and navigates directly to profile from sidebar"
     screen.getByRole("button", { name: "Профиль и шаблон" }),
   );
   expect(screen.getByText("Candidate.docx")).toBeInTheDocument();
+});
+
+it.each([
+  ["ready", "Поиск завершён."],
+  ["cancelled", "Поиск отменён."],
+  ["failed", "Не удалось завершить поиск. Попробуйте запустить его ещё раз."],
+] as const)("reports the terminal search state %s", async (status, message) => {
+  const backend = server();
+  render(<Workspace onLogout={vi.fn()} />);
+  await screen.findByText(/11 вакансий/);
+  await userEvent.click(screen.getByRole("button", { name: "Обновить поиск" }));
+  await screen.findByText(/Поиск запущен/);
+  backend.state.tasks[0] = { ...backend.state.tasks[0], status };
+  act(() => TestEvents.latest.change?.());
+  expect(await screen.findByText(message)).toBeVisible();
 });
 
 it("waits for the existing profile before allowing template changes", async () => {
