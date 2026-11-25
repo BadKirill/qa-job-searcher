@@ -76,6 +76,8 @@ jobs:
           python-version: '3.12'
       - run: docker build -f Dockerfile.runtime -t job-searcher-runtime:local .
       - run: python tests/runtime_rehearsal.py
+        env:
+          PYTHONPATH: ..
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:

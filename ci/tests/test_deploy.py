@@ -1,4 +1,5 @@
 import json
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -102,7 +103,7 @@ def test_prepare_checks_hashes_scope_architecture_and_source(runtime, monkeypatc
         assert deploy.prepare(COMMIT, expected).name == COMMIT
 
 
-@pytest.mark.parametrize("failure", [None, "drain", "up", "schema"])
+@pytest.mark.parametrize("failure", [None, "drain", "up", "health", "rollback", "schema"])
 def test_activation_rollback_preserves_database_and_private_files(runtime, monkeypatch, failure):
     release = runtime / ".runtime/candidate"
     release.mkdir()
@@ -129,12 +130,19 @@ def test_activation_rollback_preserves_database_and_private_files(runtime, monke
         "drain",
         lambda: (_ for _ in ()).throw(RuntimeError("active task")) if failure == "drain" else None,
     )
-    monkeypatch.setattr(deploy, "healthy", lambda: None)
-    monkeypatch.setattr(deploy, "ready", lambda: None)
+
+    def wait(phase, compose):
+        calls.append(("health", phase))
+        if failure == "rollback" or (failure == "health" and phase == "activate"):
+            raise RuntimeError(f"{phase} runtime failed")
+        assert compose("ps", "--all", "--format", "json") == ""
+
+    monkeypatch.setattr(deploy, "wait_until_healthy", wait)
+    monkeypatch.setattr(deploy, "ready", lambda: calls.append(("readiness",)))
     revisions = iter(["0007", "0008" if failure == "schema" else "0007"])
     monkeypatch.setattr(deploy, "revision", lambda: next(revisions))
     if failure:
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError) as error:
             deploy.activate(release)
         assert (
             (runtime / "compose.aws.json")
@@ -145,11 +153,20 @@ def test_activation_rollback_preserves_database_and_private_files(runtime, monke
             assert calls[-1][0] == "stop"
         else:
             assert ("maintenance", False) in calls
+            assert ("health", "rollback") in calls
+            if failure == "rollback":
+                assert "rollback runtime failed" in str(error.value)
+                assert "activate runtime failed" in str(error.value.__context__)
+                assert ("readiness",) not in calls
+            else:
+                assert calls[-1] == ("readiness",)
     else:
         deploy.activate(release)
         assert (runtime / "compose.aws.json").read_text().startswith("new-")
+        assert ("health", "activate") in calls and calls[-1] == ("readiness",)
     assert (runtime / ".runtime/runtime.env").read_text() == "WEB_ORIGINS=https://getcareer.app\n"
     assert all("restore" not in args and "--volumes" not in args for args in calls)
+    assert all("--wait" not in args for args in calls)
 
 
 def test_backup_and_activation_sequence_under_shared_lock(runtime, monkeypatch):
@@ -169,7 +186,7 @@ def test_backup_and_activation_sequence_under_shared_lock(runtime, monkeypatch):
     deploy.main()
 
 
-def test_command_arguments_and_runtime_health(runtime, monkeypatch):
+def test_command_arguments(runtime, monkeypatch):
     calls = []
     monkeypatch.setattr(
         deploy.subprocess,
@@ -185,15 +202,106 @@ def test_command_arguments_and_runtime_health(runtime, monkeypatch):
     deploy.drain()
     assert all(kwargs["check"] is True for _, kwargs in calls)
     assert any("s3://" in str(command) for command, _ in calls)
-    healthy = "\n".join(
-        json.dumps({"Service": service, "Health": "healthy"})
-        for service in ["postgres", *deploy.SERVICES]
+
+
+def compose_rows():
+    return [
+        {"Service": "migrate", "State": "exited", "Health": "", "ExitCode": 0},
+        *[
+            {"Service": service, "State": "running", "Health": "healthy", "ExitCode": 0}
+            for service in ["postgres", *deploy.SERVICES]
+        ],
+    ]
+
+
+def test_runtime_health_waits_for_late_container_and_reports_only_changes(monkeypatch, capsys):
+    healthy = compose_rows()
+    starting = [*healthy[:-1], {**healthy[-1], "Health": "starting"}]
+    snapshots = iter(
+        [json.dumps(starting), json.dumps(starting), "\n".join(map(json.dumps, healthy))]
     )
-    monkeypatch.setattr(deploy, "dc", lambda *args, **kwargs: SimpleNamespace(stdout=healthy))
-    deploy.healthy()
-    monkeypatch.setattr(deploy, "dc", lambda *args, **kwargs: SimpleNamespace(stdout=""))
-    with pytest.raises(RuntimeError):
-        deploy.healthy()
+    sleeps = []
+    monkeypatch.setattr(deploy.time, "sleep", sleeps.append)
+
+    def compose(*arguments):
+        assert arguments == ("ps", "--all", "--format", "json")
+        return next(snapshots)
+
+    deploy.wait_until_healthy("activate", compose)
+    assert sleeps == [3, 3]
+    records = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [item["phase"] for item in records] == ["activate", "activate"]
+    assert [item["runtime_health"]["document-worker"]["health"] for item in records] == [
+        "starting",
+        "healthy",
+    ]
+
+
+@pytest.mark.parametrize(
+    "defect", ["no_output", "migrating", "migration_failed", "stopped", "missing"]
+)
+def test_runtime_timeout_keeps_unready_release_failed(defect, capsys):
+    rows = compose_rows()
+    if defect == "migrating":
+        rows[0]["State"] = "running"
+    elif defect == "migration_failed":
+        rows[0]["ExitCode"] = 1
+    elif defect == "stopped":
+        rows[-1]["State"] = "exited"
+    elif defect == "missing":
+        rows.pop()
+    output = "" if defect == "no_output" else json.dumps(rows)
+    with pytest.raises(RuntimeError, match=r"healthy \(rollback, 0s\)"):
+        deploy.wait_until_healthy("rollback", lambda *args: output, timeout=0)
+    states = json.loads(capsys.readouterr().out)["runtime_health"]
+    assert states["document-worker"]["state"] == (
+        {"missing": "missing", "no_output": "missing", "stopped": "exited"}.get(defect, "running")
+    )
+
+
+def test_start_runtime_does_not_probe_readiness_after_compose_failure(monkeypatch):
+    failure = subprocess.CalledProcessError(1, ["docker", "compose", "up"])
+
+    def dc(*arguments):
+        assert arguments == ("up", "-d", "--no-build", "--wait-timeout", "180")
+        raise failure
+
+    monkeypatch.setattr(deploy, "dc", dc)
+    with pytest.raises(subprocess.CalledProcessError) as error:
+        deploy.start_runtime("activate")
+    assert error.value is failure
+
+
+@pytest.mark.parametrize("release_lock", [False, True])
+def test_shared_deploy_lock_waits_without_releasing_the_backup_lock(
+    runtime, monkeypatch, capsys, release_lock
+):
+    elapsed = 0
+    with deploy.LOCK.open("w") as backup, deploy.LOCK.open("w") as deployment:
+        deploy.fcntl.flock(backup, deploy.fcntl.LOCK_EX | deploy.fcntl.LOCK_NB)
+
+        def sleep(seconds):
+            nonlocal elapsed
+            with pytest.raises(BlockingIOError):
+                deploy.fcntl.flock(deployment, deploy.fcntl.LOCK_EX | deploy.fcntl.LOCK_NB)
+            elapsed += seconds
+            if release_lock:
+                deploy.fcntl.flock(backup, deploy.fcntl.LOCK_UN)
+
+        monkeypatch.setattr(deploy.time, "monotonic", lambda: elapsed)
+        monkeypatch.setattr(deploy.time, "sleep", sleep)
+        if release_lock:
+            deploy.acquire_deploy_lock(deployment, timeout=5)
+            with pytest.raises(BlockingIOError):
+                deploy.fcntl.flock(backup, deploy.fcntl.LOCK_EX | deploy.fcntl.LOCK_NB)
+        else:
+            with pytest.raises(RuntimeError, match="lock is still busy after 5s"):
+                deploy.acquire_deploy_lock(deployment, timeout=5)
+    events = [json.loads(line)["event"] for line in capsys.readouterr().out.splitlines()]
+    assert events == ["waiting_for_backup_deploy_lock"] + (
+        ["backup_deploy_lock_acquired"] if release_lock else []
+    )
+    assert elapsed == (3 if release_lock else 5)
 
 
 @pytest.mark.parametrize("status", [200, 503])

@@ -3,9 +3,12 @@ import os
 import socket
 import subprocess
 import time
+from functools import partial
 from pathlib import Path
 from urllib.request import Request, urlopen
 from uuid import uuid4
+
+from ci.deploy import wait_until_healthy
 
 
 def free_port():
@@ -170,7 +173,8 @@ db.close()
         with urlopen(request, timeout=10) as response:
             assert json.load(response)["user"]["login"] == "rehearsal-owner"
         compose(recovery, "stop", *services)
-        compose(recovery, "up", "-d", "--no-build", "--wait", "--wait-timeout", "120")
+        compose(recovery, "up", "-d", "--no-build", "--wait-timeout", "180")
+        wait_until_healthy("rehearsal", partial(compose, recovery), timeout=120)
         with urlopen(origin + "/health/ready", timeout=10) as response:
             assert json.load(response) == {"ready": True}
         report = {
@@ -179,6 +183,7 @@ db.close()
             "restored_login": True,
             "restored_file": True,
             "stop_start": True,
+            "deployment_readiness": True,
             "telegram_started": False,
             "nested_data_root": True,
             "duration_seconds": round(time.monotonic() - started, 2),

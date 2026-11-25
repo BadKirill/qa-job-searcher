@@ -47,7 +47,9 @@ def log(event, **fields):
 
 
 def failure_diagnostics(stderr):
-    if "fcntl.flock" in stderr and "BlockingIOError: [Errno 11]" in stderr:
+    if "Backup/deploy lock is still busy" in stderr or (
+        "fcntl.flock" in stderr and "BlockingIOError: [Errno 11]" in stderr
+    ):
         return {
             "reason": "shared_backup_deploy_lock_busy",
             "message": (

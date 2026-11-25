@@ -126,12 +126,18 @@ def test_delivery_logs_poll_errors_transitions_and_periodic_progress(
     assert "Deployed" not in report
 
 
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)\nBlockingIOError: [Errno 11]",
+        "RuntimeError: Backup/deploy lock is still busy after 180s",
+    ],
+)
 def test_terminal_lock_contention_reports_failure_before_preparation(
-    monkeypatch, delivery_clock, capsys, tmp_path
+    monkeypatch, delivery_clock, capsys, tmp_path, stderr
 ):
     summary = tmp_path / "summary"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
-    stderr = "fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)\nBlockingIOError: [Errno 11]"
     response = {
         "Status": "Failed",
         "StatusDetails": "Failed",

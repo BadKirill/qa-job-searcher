@@ -84,7 +84,7 @@ class RuntimeWorker:
                 worked = False
             if not worked:
                 with suppress(TimeoutError):
-                    await asyncio.wait_for(stop.wait(), 0.25)
+                    await asyncio.wait_for(stop.wait(), 1)
 
     async def run(self, stop, lanes=None):
         lanes = lanes or {"search": 2, "chat": 2, "document": 2}
