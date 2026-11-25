@@ -1,0 +1,29 @@
+[
+  {
+    "conclusion": "success",
+    "created_at": "2026-11-23T09:13:15Z",
+    "head_sha": "ea12c401ae3b805135b06b0df44ebe410727bfe1",
+    "html_url": "https://github.com/BadKirill/qa-job-searcher/actions/runs/45145057229",
+    "id": 45145057229,
+    "run_attempt": 1,
+    "status": "completed"
+  },
+  {
+    "conclusion": "success",
+    "created_at": "2026-11-23T03:33:36Z",
+    "head_sha": "20877fc3426614af4c9277db0b97a758daa59320",
+    "html_url": "https://github.com/BadKirill/qa-job-searcher/actions/runs/45106692795",
+    "id": 45106692795,
+    "run_attempt": 1,
+    "status": "completed"
+  },
+  {
+    "conclusion": "failure",
+    "created_at": "2026-11-23T02:29:19Z",
+    "head_sha": "cf64eff8029508dd7abd42a3d51d28940cc26187",
+    "html_url": "https://github.com/BadKirill/qa-job-searcher/actions/runs/45100483824",
+    "id": 45100483824,
+    "run_attempt": 3,
+    "status": "completed"
+  }
+]
