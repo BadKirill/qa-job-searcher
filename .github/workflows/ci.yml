@@ -207,22 +207,15 @@ jobs:
           INSTANCE_ID: i-030fa1abecd9da0ac
         run: |
           set -euo pipefail
+          printf 'Publishing release %s in %s.\n' "$GITHUB_SHA" "$AWS_REGION"
           aws s3 cp release/ "s3://qa-job-searcher-577331852274-eu-north-1/artifacts/releases/$GITHUB_SHA/" --recursive --sse AES256 --only-show-errors
           manifest_sha=$(sha256sum release/release.json | cut -d' ' -f1)
           parameters=$(jq -n --arg commit "$GITHUB_SHA" --arg checksum "$manifest_sha" '{Commit:[$commit],ManifestSHA256:[$checksum]}')
+          printf 'Requesting deployment of %s on %s.\n' "$GITHUB_SHA" "$INSTANCE_ID"
           command_id=$(aws ssm send-command --document-name qa-job-searcher-deploy --instance-ids "$INSTANCE_ID" --parameters "$parameters" --comment "Deploy $GITHUB_SHA" --query Command.CommandId --output text)
-          printf 'SSM command: %s\n' "$command_id" >> "$GITHUB_STEP_SUMMARY"
-          for attempt in $(seq 1 180); do
-            invocation=$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$INSTANCE_ID" --output json 2>/dev/null || true)
-            status=$(printf '%s' "$invocation" | jq -r '.Status // "Pending"')
-            case "$status" in
-              Success) printf '%s' "$invocation" | jq '{Status,StandardOutputContent}'; exit 0 ;;
-              Failed|Cancelled|TimedOut|Cancelling) printf '%s' "$invocation" | jq '{Status,StandardOutputContent,StandardErrorContent}'; exit 1 ;;
-            esac
-            sleep 10
-          done
-          printf 'Timed out waiting; inspect the existing SSM command before any retry.\n' >&2
-          exit 1
+          printf 'Release: `%s`\n\nSSM command: `%s`\n' "$GITHUB_SHA" "$command_id" >> "$GITHUB_STEP_SUMMARY"
+          printf 'SSM accepted command %s.\n' "$command_id"
+          python ci/ssm_delivery.py "$command_id" "$INSTANCE_ID"
       - name: Verify public HTTPS
         run: |
           python ci/verify_public.py
