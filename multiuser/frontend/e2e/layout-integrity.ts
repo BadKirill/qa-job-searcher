@@ -130,7 +130,7 @@ export async function expectLayoutIntegrity(page: Page) {
         fail("form-padding", form, `${style.paddingLeft} / ${style.paddingRight}`);
       }
       const fields = Array.from(form.querySelectorAll<HTMLElement>(":scope > label"))
-        .map((label) => ({ label, input: label.querySelector<HTMLElement>(":scope > input:not([type=checkbox]), :scope > select") }))
+        .map((label) => ({ label, input: label.querySelector<HTMLElement>(":scope > input:not([type=checkbox]), :scope > select, :scope > .settings-select > select") }))
         .filter((field) => field.input && visible(field.input));
       for (let i = 0; i < fields.length; i++) {
         for (let j = i + 1; j < fields.length; j++) {

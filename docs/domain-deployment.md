@@ -1,6 +1,7 @@
-# Production-домен GetCareer
+# Production-домен getCareer
 
-23 ноября 2026 подключён https://getcareer.app. Регистрация и DNS находятся в
+23 ноября 2026 подключён https://getcareer.app. В интерфейсе и заголовке вкладки
+название пишется `getCareer`. Регистрация и DNS находятся в
 Cloudflare; приложение, PostgreSQL и приватные файлы остаются на существующем
 EC2 `i-030fa1abecd9da0ac` в eu-north-1. Данные повторно не переносились.
 
@@ -28,6 +29,11 @@ CORS для внешних origins не включён. www перенаправ
 session endpoint нужен для первоначального отображения входа и не выдаёт личные
 данные без сессии. Все пользовательские API требуют серверную авторизацию,
 изменения также CSRF, административные действия — права администратора.
+
+Приложение отдаёт HTML с `Cache-Control: no-store, no-transform`, чтобы прокси
+сохранял исходную страницу без вставки скрипта аналитики. CSP допускает скрипты
+только с основного домена. Проверять ответ Cloudflare с заголовками браузера.
+[Cloudflare Web Analytics](https://developers.cloudflare.com/web-analytics/get-started/)
 
 Caddy закрывает `/health/*`, `/docs`, `/redoc`, `/openapi.json`, `/metrics`, `/debug`,
 `/.env`, `/.git*` и начальный `/api/setup`. Swagger/OpenAPI дополнительно выключены

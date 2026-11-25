@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { errorMessage, request, setCsrfToken } from "./api";
-import { Icon, Loading, Notice, TaskStatus } from "./components";
+import { Brand, Icon, Loading, Notice, TaskStatus } from "./components";
 import { Jobs } from "./Jobs";
 import { Login } from "./Login";
 import { Profile } from "./Profile";
@@ -63,12 +63,7 @@ export function Workspace({ onLogout }: { onLogout: () => void }) {
         К содержимому
       </a>
       <aside className="sidebar">
-        <a className="brand" href="/" aria-label="QA Job Searcher">
-          <span className="brand-mark">
-            qa<span>.</span>
-          </span>
-          <span>job searcher</span>
-        </a>
+        <Brand />
         <div className="workspace-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
         <nav aria-label="Основная навигация">
           <button
@@ -200,7 +195,7 @@ export function Workspace({ onLogout }: { onLogout: () => void }) {
               ))}
           </section>
           <footer className="main-footer">
-            <span>QA JOB SEARCHER</span>
+            <span>getCareer</span>
             <span>Следующая хорошая возможность уже ближе.</span>
           </footer>
         </main>

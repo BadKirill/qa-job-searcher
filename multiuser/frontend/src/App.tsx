@@ -1,12 +1,13 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { errorMessage, request, setCsrfToken, credentialsReady } from "./api";
-import { Icon, Loading, Notice, TaskStatus } from "./components";
+import { Brand, Icon, Loading, Notice } from "./components";
 import { SearchSettings } from "./SearchSettings";
 import { Account } from "./Account";
 import { Jobs } from "./Jobs";
 import { Login } from "./Login";
 import { Profile } from "./Profile";
 import { WorkspaceStatus, type SetupPage } from "./WorkspaceStatus";
+import { useRefreshEffect } from "./useRefreshEffect";
 import type {
   AccountUser,
   Profile as ProfileData,
@@ -34,36 +35,33 @@ export function Workspace({
   const [connected, setConnected] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
   const main = useRef<HTMLElement>(null);
-  const reload = () => setRevision((value) => value + 1);
+  const reload = useCallback(() => setRevision((value) => value + 1), []);
   useEffect(() => {
     const heading = main.current?.querySelector("h1");
     heading?.setAttribute("tabindex", "-1");
     heading?.focus();
   }, [view]);
-  useEffect(() => {
-    const controller = new AbortController();
-    Promise.all([
-      request<ProfileData>("/profile", { signal: controller.signal }),
-      request<{ items: Task[] }>("/tasks", { signal: controller.signal }),
-    ])
-      .then(([data, results]) => {
-        if (controller.signal.aborted) return;
-        setProfile(data);
-        setTasks(results.items);
-        setError("");
-      })
-      .catch((failure) => {
-        if (!controller.signal.aborted) setError(errorMessage(failure));
-      });
-    return () => controller.abort();
-  }, [revision]);
+  const loadWorkspace = useCallback(async (signal: AbortSignal) => {
+    try {
+      const [data, results] = await Promise.all([
+        request<ProfileData>("/profile", { signal }),
+        request<{ items: Task[] }>("/tasks", { signal }),
+      ]);
+      if (signal.aborted) return;
+      setProfile(data);
+      setTasks(results.items);
+      setError("");
+    } catch (failure) {
+      if (!signal.aborted) setError(errorMessage(failure));
+    }
+  }, []);
+  useRefreshEffect(loadWorkspace, revision);
   useEffect(() => {
     let active = true;
     const events = new EventSource("/api/events");
     events.onopen = () => {
       if (!active) return;
       setConnected(true);
-      reload();
     };
     events.onerror = () => {
       if (active) setConnected(false);
@@ -85,7 +83,7 @@ export function Workspace({
       events.close();
       window.clearInterval(timer);
     };
-  }, [csrfToken]);
+  }, [csrfToken, reload]);
   async function logout() {
     setLoggingOut(true);
     try {
@@ -103,12 +101,7 @@ export function Workspace({
         К содержимому
       </a>
       <aside className="sidebar">
-        <a className="brand" href="/" aria-label="Job Searcher">
-          <span className="brand-mark">
-            job<span>.</span>
-          </span>
-          <span>job searcher</span>
-        </a>
+        <Brand />
         <div className="workspace-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
         <nav aria-label="Основная навигация">
           <button
@@ -261,6 +254,7 @@ export function Workspace({
             <SearchSettings
               section={view === "criteria" || view === "sources" ? view : "all"}
               onSection={setView}
+              onChange={reload}
             />
           ) : (view === "account" || view === "usage") && user ? (
             <Account
@@ -291,18 +285,8 @@ export function Workspace({
               onTask={reload}
             />
           )}
-          <section className="background-tasks" aria-label="Состояние поиска">
-            {tasks
-              .filter(
-                (task) => task.kind === "search" && task.status !== "ready",
-              )
-              .slice(0, 1)
-              .map((task) => (
-                <TaskStatus key={task.id} task={task} />
-              ))}
-          </section>
           <footer className="main-footer">
-            <span>JOB SEARCHER</span>
+            <span>getCareer</span>
             <span>Следующая хорошая возможность уже ближе.</span>
           </footer>
         </main>
@@ -416,10 +400,7 @@ export function App() {
   if (session?.maintenance)
     return (
       <main className="maintenance-screen">
-        <a className="brand" href="/" aria-label="Job Searcher">
-          <span className="brand-mark">job<span>.</span></span>
-          <span>job searcher</span>
-        </a>
+        <Brand />
         <section className="maintenance-card" aria-label="Обслуживание сервиса">
           <div className="maintenance-icon" aria-hidden="true">
             <Icon name="refresh" size={28} />

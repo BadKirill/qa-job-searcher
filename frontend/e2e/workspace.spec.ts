@@ -8,6 +8,8 @@ const cvPath = path.resolve("../tests/fixtures/candidate.docx");
 
 async function signIn(page: Page) {
   await page.goto("/");
+  await expect(page).toHaveTitle("getCareer · Поиск работы");
+  await expect(page.getByRole("link", { name: "getCareer", exact: true })).toBeVisible();
   const session = await (await page.request.get("/api/session")).json();
   if (session.authenticated) return;
   if (session.setup_required) {
@@ -37,6 +39,7 @@ test("private access, pagination, applied and archive survive browser reload", a
   expect((await page.request.get("/api/artifacts/guessed/preview")).status()).toBe(401);
   expect((await page.request.get("/api/tasks/guessed/document-preview")).status()).toBe(401);
   await signIn(page);
+  await expect(page.locator(".main-footer").getByText("getCareer", { exact: true })).toBeVisible();
   await expect(page.getByRole("article")).toHaveCount(10);
   await expect(page.getByText("21 вакансий", { exact: false })).toBeVisible();
   await expect(page.getByText("Последний поиск:", { exact: false })).toBeVisible();

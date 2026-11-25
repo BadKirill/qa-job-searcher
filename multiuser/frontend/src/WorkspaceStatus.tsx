@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { errorMessage, request } from "./api";
 import { Loading, Notice } from "./components";
+import { useRefreshEffect } from "./useRefreshEffect";
 
 export type WorkspaceSummary = {
   setup: {
@@ -32,19 +33,17 @@ export function WorkspaceStatus({
   const [summary, setSummary] = useState<WorkspaceSummary | null>(null);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
-  useEffect(() => {
-    const controller = new AbortController();
-    request<WorkspaceSummary>("/workspace", { signal: controller.signal })
-      .then((data) => {
-        if (controller.signal.aborted) return;
-        setSummary(data);
-        setError("");
-      })
-      .catch((failure) => {
-        if (!controller.signal.aborted) setError(errorMessage(failure));
-      });
-    return () => controller.abort();
-  }, [revision, retry]);
+  const loadSummary = useCallback(async (signal: AbortSignal) => {
+    try {
+      const data = await request<WorkspaceSummary>("/workspace", { signal });
+      if (signal.aborted) return;
+      setSummary(data);
+      setError("");
+    } catch (failure) {
+      if (!signal.aborted) setError(errorMessage(failure));
+    }
+  }, []);
+  useRefreshEffect(loadSummary, revision + retry);
   const setup = summary?.setup;
   const sourcesReady =
     !!setup &&
@@ -110,7 +109,7 @@ export function WorkspaceStatus({
                 <li>
                   <span>
                     {setup?.search_configured
-                      ? `Критерии сохранены · версия ${setup.profile_version}`
+                      ? "Критерии поиска сохранены"
                       : "Укажите желаемую работу"}
                   </span>
                   <button

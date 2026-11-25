@@ -344,7 +344,11 @@ def approved_artifact(client, path=None):
 
 def test_download_gate_integrity_and_static_security(client, tmp_path):
     authenticate(client)
-    assert client.get("/").status_code == 200
+    html = client.get("/")
+    assert html.status_code == 200
+    assert html.headers["cache-control"] == "no-store, no-transform"
+    assert "script-src 'self'" in html.headers["content-security-policy"]
+    assert client.get("/api/session").headers["cache-control"] == "no-store"
     assert client.get("/missing").status_code == 404
     assert client.get("/api/artifacts/missing/download").status_code == 404
     artifact, path = approved_artifact(client)
