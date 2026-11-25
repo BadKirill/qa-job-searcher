@@ -148,6 +148,37 @@ def test_terminal_lock_contention_reports_failure_before_preparation(
     assert "Traceback" not in summary.read_text() and "fcntl" not in summary.read_text()
 
 
+@pytest.mark.parametrize(
+    ("stderr", "expected_reason", "compose_timeout"),
+    [
+        (
+            "RuntimeError: Not all runtime services are healthy",
+            "runtime_health_check_failed",
+            False,
+        ),
+        (
+            "application not healthy after 3m0s\n"
+            "RuntimeError: Not all runtime services are healthy",
+            "runtime_health_check_failed",
+            True,
+        ),
+        ("application not healthy after 3m0s", "compose_health_wait_expired", None),
+    ],
+)
+def test_health_failures_are_identified_in_the_delivery_summary(
+    monkeypatch, delivery_clock, capsys, tmp_path, stderr, expected_reason, compose_timeout
+):
+    summary = tmp_path / "summary"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    response = {"Status": "Failed", "StatusDetails": "Failed", "StandardErrorContent": stderr}
+    monkeypatch.setattr(ssm_delivery, "read_invocation", lambda *args, **kwargs: response)
+    assert ssm_delivery.wait(COMMAND, INSTANCE) == 1
+    result = events(capsys)[-1]
+    assert result["reason"] == expected_reason
+    assert result.get("ComposeHealthWaitExpired") is compose_timeout
+    assert expected_reason in summary.read_text()
+
+
 @pytest.mark.parametrize("status", ["Cancelled", "TimedOut", "Failed"])
 def test_other_terminal_errors_keep_service_details(monkeypatch, delivery_clock, capsys, status):
     responses = iter(

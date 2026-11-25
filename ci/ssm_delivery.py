@@ -46,27 +46,49 @@ def log(event, **fields):
     print(json.dumps({"event": event, **fields}), flush=True)
 
 
+def failure_diagnostics(stderr):
+    if "fcntl.flock" in stderr and "BlockingIOError: [Errno 11]" in stderr:
+        return {
+            "reason": "shared_backup_deploy_lock_busy",
+            "message": (
+                "Release stopped before preparation because /run/qa-job-searcher-backup.lock "
+                "is busy. Check backup and deployment activity before retrying."
+            ),
+        }
+    compose_health_timeout = "application not healthy after " in stderr
+    if "Not all runtime services are healthy" in stderr:
+        return {
+            "reason": "runtime_health_check_failed",
+            "message": (
+                "Runtime health verification failed after startup. "
+                "Inspect service health and rollback completion before retrying."
+            ),
+            "ComposeHealthWaitExpired": compose_health_timeout,
+        }
+    if compose_health_timeout:
+        return {
+            "reason": "compose_health_wait_expired",
+            "message": "Docker Compose timed out waiting for healthy services.",
+        }
+    return {"reason": "ssm_terminal_failure", "message": "SSM reported a terminal failure."}
+
+
 def finish(report, invocation=None):
     outputs = {}
     if invocation is None:
-        reason = "poll_timeout"
-        message = "Inspect the existing SSM command before any retry. Its outcome is unknown."
+        report.update(
+            reason="poll_timeout",
+            message="Inspect the existing SSM command before any retry. Its outcome is unknown.",
+        )
     else:
         report.update({field: invocation.get(field) for field in EXECUTION_FIELDS})
         outputs["StandardOutputContent"] = invocation.get("StandardOutputContent")
-        reason = "ssm_completed"
-        message = "SSM reported a terminal result."
-        if invocation["Status"] != "Success":
-            reason = "ssm_terminal_failure"
+        if invocation["Status"] == "Success":
+            report.update(reason="ssm_completed", message="SSM reported success.")
+        else:
             stderr = invocation.get("StandardErrorContent") or ""
             outputs["StandardErrorContent"] = stderr
-            if "fcntl.flock" in stderr and "BlockingIOError: [Errno 11]" in stderr:
-                reason = "shared_backup_deploy_lock_busy"
-                message = (
-                    "Release stopped before preparation because /run/qa-job-searcher-backup.lock "
-                    "is busy. Check backup and deployment activity before retrying."
-                )
-    report.update(reason=reason, message=message)
+            report.update(failure_diagnostics(stderr))
     log("ssm_delivery_result", **report, **outputs)
     if summary := os.getenv("GITHUB_STEP_SUMMARY"):
         with Path(summary).open("a", encoding="utf-8") as output:
