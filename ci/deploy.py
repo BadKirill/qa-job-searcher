@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import urllib.parse
 from pathlib import Path
 
@@ -28,7 +29,7 @@ def run(command, **kwargs):
     return subprocess.run(command, check=True, text=True, **kwargs)
 
 
-def dc(*arguments, capture_output=False):
+def dc(*arguments, capture_output=False, **kwargs):
     return run(
         [
             "docker",
@@ -44,6 +45,7 @@ def dc(*arguments, capture_output=False):
             *arguments,
         ],
         capture_output=capture_output,
+        **kwargs,
     )
 
 
@@ -162,11 +164,43 @@ finally:
     dc("exec", "-T", "api", "python", "-c", script)
 
 
-def healthy():
-    rows = dc("ps", "--format", "json", capture_output=True).stdout
-    states = {row["Service"]: row.get("Health") for row in map(json.loads, rows.splitlines())}
-    if any(states.get(service) != "healthy" for service in ["postgres", *SERVICES]):
-        raise RuntimeError("Not all runtime services are healthy")
+def runtime_states(output):
+    output = output.strip()
+    rows = json.loads(output) if output.startswith("[") else map(json.loads, output.splitlines())
+    states = {}
+    by_service = {row["Service"]: row for row in rows}
+    for service in ["postgres", "migrate", *SERVICES]:
+        row = by_service.get(service, {})
+        states[service] = {
+            "state": row.get("State", "missing"),
+            "health": row.get("Health"),
+            "exit_code": row.get("ExitCode"),
+        }
+    return states
+
+
+def wait_until_healthy(phase, compose, timeout=300):
+    deadline = time.monotonic() + timeout
+    previous = None
+    while True:
+        states = runtime_states(compose("ps", "--all", "--format", "json"))
+        if states != previous:
+            print(json.dumps({"phase": phase, "runtime_health": states}), flush=True)
+            previous = states
+        migration = states["migrate"]
+        if (
+            migration["state"] == "exited"
+            and migration["exit_code"] == 0
+            and all(
+                states[service]["state"] == "running" and states[service]["health"] == "healthy"
+                for service in ["postgres", *SERVICES]
+            )
+        ):
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError(f"Not all runtime services are healthy ({phase}, {timeout}s)")
+        time.sleep(min(3, remaining))
 
 
 def ready():
@@ -184,6 +218,14 @@ def ready():
             raise RuntimeError("Production readiness failed")
     finally:
         connection.close()
+
+
+def start_runtime(phase):
+    print(json.dumps({"phase": phase, "event": "starting_runtime"}), flush=True)
+    dc("up", "-d", "--no-build", "--wait-timeout", "180")
+    wait_until_healthy(phase, lambda *args: dc(*args, capture_output=True, timeout=20).stdout)
+    ready()
+    run(["systemctl", "reload", "caddy"])
 
 
 def replace(source, destination):
@@ -219,10 +261,7 @@ def activate(directory):
         switched = True
         dc("config", "--quiet")
         maintenance(False)
-        dc("up", "-d", "--no-build", "--wait", "--wait-timeout", "180")
-        healthy()
-        ready()
-        run(["systemctl", "reload", "caddy"])
+        start_runtime("activate")
     except Exception:
         maintenance(True)
         if switched and revision() != before:
@@ -233,14 +272,33 @@ def activate(directory):
         for name, destination in configuration.items():
             replace(previous / name, destination)
         maintenance(False)
-        dc("up", "-d", "--no-build", "--wait", "--wait-timeout", "180")
-        run(["systemctl", "reload", "caddy"])
+        start_runtime("rollback")
         raise
+
+
+def acquire_deploy_lock(lock, timeout=180):
+    deadline = time.monotonic() + timeout
+    waiting = False
+    while True:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError(f"Backup/deploy lock is still busy after {timeout}s") from None
+            if not waiting:
+                print(json.dumps({"event": "waiting_for_backup_deploy_lock"}), flush=True)
+                waiting = True
+            time.sleep(min(3, remaining))
+        else:
+            if waiting:
+                print(json.dumps({"event": "backup_deploy_lock_acquired"}), flush=True)
+            return
 
 
 def deploy(commit, expected):
     with LOCK.open("w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        acquire_deploy_lock(lock)
         directory = prepare(commit, expected)
         dc("config", "--quiet")
         run(

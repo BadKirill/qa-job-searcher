@@ -2,9 +2,9 @@
   {
     "rule_id": "py/overly-permissive-file",
     "filename": "ci/deploy.py",
-    "line": 197,
+    "line": 239,
     "files": {
-      "ci/deploy.py": "4fcabd63278b1f798e51affde4716f457ce8a42a3a0f355a5a544f8a57a65097",
+      "ci/deploy.py": "fe18e63861802203147da1462d1e52b570ccb56108c5c82c3a6f589a4ab07217",
       "infra/aws/Caddyfile": "bda29066994c19fba89a5c7aee92782aef9cf7236ba625d202e709e6981477a0",
       "ci/image_identity.py": "b56ae29da1f83352f103c30338bbc518f239722e7ed6cceb1be5042559b37d58"
     },

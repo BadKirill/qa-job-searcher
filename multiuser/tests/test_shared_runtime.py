@@ -673,6 +673,27 @@ async def test_idle_runtime_and_scheduler_exit_on_stop(pg_store, tmp_path, monke
     await scheduler.run(stop)
 
 
+async def test_runtime_paces_empty_polls_without_delaying_work_or_shutdown(
+    pg_store, tmp_path, monkeypatch
+):
+    stop = asyncio.Event()
+    dispatcher = RuntimeWorker(pg_store.database, WebSettings(tmp_path), FixtureGateway())
+    run = AsyncMock(side_effect=[True, False, False])
+    monkeypatch.setattr(dispatcher, "once", run)
+    idle = []
+
+    async def wait_for(awaitable, timeout):
+        awaitable.close()
+        idle.append((run.await_count, timeout))
+        if len(idle) == 1:
+            raise TimeoutError
+        stop.set()
+
+    monkeypatch.setattr(asyncio, "wait_for", wait_for)
+    await dispatcher.serve("search", stop)
+    assert idle == [(2, 1), (3, 1)]
+
+
 async def test_real_mcp_and_real_transport_write_usage_and_external_ids(pg_store, monkeypatch):
     from types import SimpleNamespace
 
