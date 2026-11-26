@@ -40,6 +40,9 @@ export function Workspace({
     const heading = main.current?.querySelector("h1");
     heading?.setAttribute("tabindex", "-1");
     heading?.focus();
+    if (view === "criteria" || view === "search_settings") {
+      heading?.closest(".page-heading")?.scrollIntoView?.({ block: "start" });
+    }
   }, [view]);
   const loadWorkspace = useCallback(async (signal: AbortSignal) => {
     try {

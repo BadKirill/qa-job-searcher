@@ -245,8 +245,10 @@ test("presets require explicit application and load a versioned saved profile", 
   await screen.findByText("Профиль поиска сохранён.");
   expect(screen.getByLabelText("Пример профиля")).toHaveValue("");
 
+  const history = screen.getByText("История версий профиля");
+  expect(history.closest("summary")).toHaveAccessibleDescription("В поиске используется версия 2");
   api.failures.push("/api/search-profile/history");
-  await user.click(screen.getByText("История версий профиля"));
+  await user.click(history);
   await user.click(await screen.findByRole("button", { name: "Повторить загрузку версий" }));
   expect(api.calls.filter((call) => call.path === "/api/search-profile")).toHaveLength(1);
   const current = await screen.findByText("Версия 2 · используется в поиске");
@@ -262,7 +264,9 @@ test("new accounts have an empty profile history", async () => {
   render(<SearchSettings />);
   await ready();
   expect(api.calls.some((call) => call.path.endsWith("/history"))).toBe(false);
-  await userEvent.click(screen.getByText("История версий профиля"));
+  const history = screen.getByText("История версий профиля");
+  expect(history.closest("summary")).toHaveAccessibleDescription("Здесь появятся ваши сохранённые критерии");
+  await userEvent.click(history);
   expect(await screen.findByText("Сохранённых версий пока нет.")).toBeVisible();
 });
 

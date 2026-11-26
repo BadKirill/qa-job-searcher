@@ -223,9 +223,9 @@ function ProfileHistory() {
   if (!items) return <Loading text="Загружаем версии профиля…" />;
   if (!items.length) return <p>Сохранённых версий пока нет.</p>;
   return (
-    <ol className="profile-versions">
+    <ol className="profile-versions" role="list">
       {[...items].reverse().map(({ version, active, profile }) => (
-        <li key={version}>
+        <li key={version} data-active={active}>
           <details>
             <summary>
               Версия {version}{active ? " · используется в поиске" : ""}
@@ -297,6 +297,7 @@ export function SearchSettings({
   const [editing, setEditing] = useState<Source | null>(null);
   const [presetChoice, setPresetChoice] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const historyId = useId();
   const savedProfile = state?.search_profile.profile ?? null;
   const savedPreset = matchingPreset(savedProfile, presets);
   const preset = presetChoice ?? savedPreset;
@@ -442,6 +443,26 @@ export function SearchSettings({
           )}
           {page !== "sources" && (
             <>
+              <details
+                className="profile-history"
+                open={historyOpen}
+                onToggle={(event) => setHistoryOpen(event.currentTarget.open)}
+              >
+                <summary aria-labelledby={historyId} aria-describedby={`${historyId}-status`}>
+                  <span className="profile-history-heading">
+                    <strong id={historyId}>История версий профиля</strong>
+                    <span id={`${historyId}-status`}>
+                      {state.search_profile.configured
+                        ? `В поиске используется версия ${state.search_profile.version}`
+                        : "Здесь появятся ваши сохранённые критерии"}
+                    </span>
+                  </span>
+                </summary>
+                <div className="profile-history-content">
+                  <p className="muted">Каждое сохранение или применение примера создаёт новую версию. Откройте версию, чтобы посмотреть её критерии.</p>
+                  {historyOpen && <ProfileHistory key={state.search_profile.version} />}
+                </div>
+              </details>
               <fieldset className="settings-presets" disabled={busy}>
                 <legend>Примеры для начала</legend>
                 <p>
@@ -526,15 +547,6 @@ export function SearchSettings({
                     Критерии сохраняются в вашем аккаунте. Для поиска используется последняя сохранённая версия.
                     Пустые необязательные поля оставляют соответствующий критерий без дополнительных настроек.
                   </p>
-                  <details
-                    className="search-history profile-history"
-                    open={historyOpen}
-                    onToggle={(event) => setHistoryOpen(event.currentTarget.open)}
-                  >
-                    <summary>История версий профиля</summary>
-                    <p className="muted">Каждое сохранение или применение примера создаёт новую версию. Откройте версию, чтобы посмотреть её критерии.</p>
-                    {historyOpen && <ProfileHistory key={state.search_profile.version} />}
-                  </details>
                   {fields.map(([field, label, hint]) => (
                     <CriteriaInput
                       key={field}
