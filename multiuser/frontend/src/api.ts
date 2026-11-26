@@ -2,6 +2,8 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public code = "",
+    public fields: Record<string, string> = {},
   ) {
     super(message);
   }
@@ -48,13 +50,24 @@ export async function request<T>(
     body,
     headers,
     credentials: "same-origin",
+  }).catch((error: unknown) => {
+    if (options.signal?.aborted) throw error;
+    throw new ApiError(0, "Нет связи с сервером. Проверьте подключение и повторите.", "network");
   });
   if (!response.ok) {
     const data = await response.json().catch(() => null);
-    const detail =
-      typeof data?.detail === "string"
-        ? data.detail
-        : "Запрос не выполнен. Попробуйте ещё раз.";
+    const fallback: Record<number, string> = {
+      401: "Сессия закончилась. Войдите снова.",
+      413: path === "/template-drafts" ? "Максимальный размер шаблона — 10 МБ." : "Запрос слишком большой.",
+      422: "Проверьте заполненные данные.",
+      429: "Достигнут лимит запросов. Подождите и повторите.",
+      502: "Сервис временно недоступен. Попробуйте позже.",
+      503: "Сервис временно недоступен. Попробуйте позже.",
+    };
+    const detail = response.status === 401 || (response.status === 413 && path === "/template-drafts")
+      ? fallback[response.status]
+      : typeof data?.detail === "string" ? data.detail
+      : fallback[response.status] ?? "Запрос не выполнен. Попробуйте ещё раз.";
     if (
       response.status === 503 &&
       data?.maintenance === true &&
@@ -67,7 +80,7 @@ export async function request<T>(
       !options.signal?.aborted
     )
       window.dispatchEvent(new Event("session-expired"));
-    throw new ApiError(response.status, detail);
+    throw new ApiError(response.status, detail, data?.code, data?.fields ?? {});
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
@@ -96,7 +109,24 @@ export function requestId() {
   return crypto.randomUUID();
 }
 
-export function taskLabel(status: string) {
+export function operationKey(storage: Map<string, string>, operation: string) {
+  const id = storage.get(operation) ?? requestId();
+  storage.set(operation, id);
+  return id;
+}
+
+export function forgetOperation(storage: Map<string, string>, operation: string, error?: unknown) {
+  if (error instanceof ApiError && (error.status === 0 || error.status >= 500)) return;
+  storage.delete(operation);
+}
+
+export function taskLabel(status: string, kind?: string) {
+  if (kind === "posting_check" && status === "queued") return "Проверка объявления в очереди";
+  if (kind === "posting_check" && status === "running") return "Проверяем оригинал…";
+  if (kind === "search" && status === "queued") return "Поиск в очереди";
+  if (kind === "search" && status === "running") return "Собираем вакансии";
+  if (kind === "cv" && status === "running") return "Создаём CV";
+  if (kind === "cover_letter" && status === "running") return "Создаём сопроводительное письмо";
   const labels: Record<string, string> = {
     queued: "В очереди",
     running: "Создаётся",

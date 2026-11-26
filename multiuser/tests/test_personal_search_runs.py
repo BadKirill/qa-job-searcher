@@ -276,7 +276,7 @@ def test_failed_source_keeps_only_own_previous_matches_and_actual_fetch_time(pg_
     assert pg_store.get_job(own["id"])["fetched_at"] == FETCHED
 
 
-def test_retention_rechecks_profile_and_deleted_or_reconfigured_sources(pg_store):
+def test_retention_rechecks_profile_and_disabled_sources(pg_store):
     source = configure(pg_store)
     first = complete(pg_store, [job()])
     pg_store.save_search_profile(SearchSpec(role_keywords=["product designer"]), 1)
@@ -284,8 +284,8 @@ def test_retention_rechecks_profile_and_deleted_or_reconfigured_sources(pg_store
     assert pg_store.list_jobs("active", 1)["total"] == 0
     assert pg_store.list_jobs("active", 1, run_id=first)["total"] == 1
     assert pg_store.get_job(job().fingerprint)["title"] == job().title
-    pg_store.delete_source(source["id"], 1)
-    pg_store.add_source(SourceSpec(kind="remotive"))
+    pg_store.update_source(source["id"], 1, enabled=False)
+    pg_store.add_source(SourceSpec(kind="himalayas"))
     complete(pg_store, error="ReadTimeout")
     assert pg_store.list_jobs("active", 1)["total"] == 0
 
@@ -336,7 +336,7 @@ def test_frozen_personal_pages_keep_content_scores_and_order_across_refreshes(pg
     )
 
 
-def test_states_and_access_survive_new_filters_empty_runs_and_source_deletion(pg_store):
+def test_states_and_access_survive_new_filters_empty_runs_and_source_disabling(pg_store):
     source = configure(pg_store)
     run = complete(pg_store, [job(), job(1)])
     listing = pg_store.list_jobs("active", 1)
@@ -345,7 +345,7 @@ def test_states_and_access_survive_new_filters_empty_runs_and_source_deletion(pg
     pg_store.change_state(two, {"archived": True})
     pg_store.save_search_profile(SearchSpec(role_keywords=["designer"]), 1)
     complete(pg_store, [])
-    pg_store.delete_source(source["id"], 1)
+    pg_store.update_source(source["id"], 1, enabled=False)
     assert pg_store.list_jobs("applied", 1)["items"][0]["id"] == one
     assert pg_store.list_jobs("archive", 1)["items"][0]["id"] == two
     pg_store.change_state(two, {"archived": False})

@@ -16,6 +16,7 @@ from qa_job_bot.matching import match_job
 from qa_job_bot.models import Job
 from qa_job_bot.pg_store import PostgresStore
 from qa_job_bot.search_models import (
+    AGGREGATORS,
     KINDS,
     SearchSpec,
     SourceSpec,
@@ -178,7 +179,7 @@ def test_profession_junior_and_workplace_are_personal_choices():
         (
             {"location_restrictions": ("Europe",)},
             {"candidate_locations": ["germany"], "allowed_locations": ["europe"]},
-            True,
+            False,
         ),
         (
             {"description": "Candidates must reside in Germany."},
@@ -189,8 +190,8 @@ def test_profession_junior_and_workplace_are_personal_choices():
         ({"location": "India"}, {"allowed_locations": ["india"]}, True),
         ({"location": "United States"}, {"blocked_locations": ["united states"]}, False),
         (
-            {"location": "Remote", "description": "US-based team. Remote across Europe."},
-            {"allowed_locations": ["europe"], "blocked_locations": ["us"]},
+            {"location": "Worldwide", "description": "US-based team."},
+            {"allowed_locations": ["worldwide"], "blocked_locations": ["us"]},
             True,
         ),
         (
@@ -240,7 +241,13 @@ def test_pg_preferences_history_ownership_and_compare_and_swap(pg_store):
         pg_store.preferences()
         == other.preferences()
         == {
-            "search_profile": {"version": 0, "configured": False, "profile": None},
+            "search_profile": {
+                "version": 0,
+                "generation": 0,
+                "editor_version": 0,
+                "configured": False,
+                "profile": None,
+            },
             "sources": {"version": 0, "items": []},
         }
     )
@@ -281,10 +288,11 @@ def test_pg_preferences_history_ownership_and_compare_and_swap(pg_store):
     assert other.search_profile_history() == [] and not other.preferences()["sources"]["items"]
 
 
-def test_pg_presets_are_explicit_atomic_and_do_not_enable_existing_sources(pg_store):
+def test_pg_recommended_sources_are_idempotent_and_do_not_enable_existing_sources(pg_store):
     board = pg_store.add_source(SourceSpec(kind="ashby", config={"token": "mine"}))
     disabled = pg_store.add_source(SourceSpec(kind="remotive", enabled=False))
-    pg_store.apply_search_preset("developer", 0, 2)
+    recommended = [SourceSpec(kind=kind) for kind in AGGREGATORS]
+    assert len(pg_store.add_source_set(recommended)["items"]) == 4
     state = pg_store.preferences()
     assert len(state["sources"]["items"]) == 6
     assert (
@@ -294,12 +302,9 @@ def test_pg_presets_are_explicit_atomic_and_do_not_enable_existing_sources(pg_st
         next(r for r in state["sources"]["items"] if r["id"] == board["id"])["config"]["token"]
         == "mine"
     )
-    pg_store.apply_search_preset("designer", 1, 3)
+    assert pg_store.add_source_set(recommended)["items"] == []
     assert pg_store.preferences()["sources"]["version"] == 3
-    for name, expected, sources in [("qa", 1, 3), ("qa", 2, 2), ("missing", 2, 3)]:
-        with pytest.raises(StoreError):
-            pg_store.apply_search_preset(name, expected, sources)
-        assert pg_store.preferences()["search_profile"]["version"] == 2
+    assert not pg_store.preferences()["search_profile"]["configured"]
     with pytest.raises(StoreError):
         pg_store.add_source(SourceSpec(kind="ashby", config={"token": "MINE"}))
     assert (
@@ -418,14 +423,10 @@ def test_preferences_api_isolated_and_validated(api_world):
         ).status_code
         == 422
     )
-    assert (
-        other.post(
-            "/api/search-presets/qa/apply",
-            json={"expected_version": 1, "expected_sources_version": 2},
-        ).status_code
-        == 200
-    )
-    assert other.get("/api/search-settings").json()["search_profile"]["version"] == 2
+    preset = other.get("/api/search-presets").json()["items"]["qa"]
+    assert not preset["candidate_locations"]
+    assert other.get("/api/search-settings").json()["search_profile"]["version"] == 1
+    assert len(other.get("/api/sources").json()["items"]) == 1
     assert other.request("DELETE", path, json={"expected_version": 2}).status_code == 204
     assert other.get(path + "/history").json()["items"][-1]["deleted"]
 
@@ -488,7 +489,8 @@ async def test_worker_uses_profile_pinned_when_each_search_is_enqueued(pg_store,
     from qa_job_bot.search_pipeline import SourceBatch
     from qa_job_bot.web_security import WebSettings
 
-    pg_store.apply_search_preset("developer", 0, 0)
+    pg_store.save_search_profile(SearchSpec.model_validate(search_presets()["developer"]), 0)
+    pg_store.add_source_set([SourceSpec(kind=kind) for kind in AGGREGATORS])
     search, interval = build_search(pg_store)
     assert (
         search.profile.role_keywords == ("backend engineer", "software engineer") and interval > 0
@@ -575,7 +577,7 @@ async def test_personal_search_pipeline_preserves_profession_and_ownership(pg_st
     assert isinstance(build_search(pg_store)[0], JobSearchService)
 
 
-def test_sources_reject_bad_edits_without_history_changes_and_presets_use_api_versions(api_world):
+def test_sources_reject_bad_edits_without_history_changes_and_profile_uses_api_versions(api_world):
     admin, member, app, _, member_id = api_world
     added = member.post(
         "/api/sources", json={"kind": "lever", "config": {"token": "company"}}
@@ -586,20 +588,15 @@ def test_sources_reject_bad_edits_without_history_changes_and_presets_use_api_ve
         == 422
     )
     assert len(member.get(path + "/history").json()["items"]) == 1
-    assert (
-        member.post(
-            "/api/search-presets/designer/apply",
-            json={"expected_version": 0, "expected_sources_version": 1},
-        ).status_code
-        == 200
+    presets = member.get("/api/search-presets").json()["items"]
+    first = member.put(
+        "/api/search-profile", json={"expected_version": 0, "profile": presets["designer"]}
     )
-    assert (
-        member.post(
-            "/api/search-presets/developer/apply",
-            json={"expected_version": 0, "expected_sources_version": 1},
-        ).status_code
-        == 409
+    assert first.status_code == 200
+    stale = member.put(
+        "/api/search-profile", json={"expected_version": 0, "profile": presets["developer"]}
     )
+    assert stale.status_code == 409
     assert member.get("/api/search-profile").json()["version"] == 1
     store = PostgresStore(app.state.database, member_id)
     with store.write() as connection:

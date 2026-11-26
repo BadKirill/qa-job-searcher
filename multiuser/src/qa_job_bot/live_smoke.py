@@ -93,7 +93,7 @@ def synthetic_cv(name, index):
 
 
 async def exercise(database, directory, gateway):
-    password, stores, identifiers = secrets.token_urlsafe(24), [], []
+    password, stores, vacancies, identifiers = secrets.token_urlsafe(24), [], [], []
     names = ("Synthetic Alpha", "Synthetic Beta")
     for index, name in enumerate(names):
         user = database.create_user(f"smoke-{index}", name)
@@ -118,10 +118,8 @@ async def exercise(database, directory, gateway):
             score=80,
             remote=True,
         )
-        store.upsert_jobs([job])
-        store.publish_search([job], [])
         stores.append(store)
-        identifiers.append(job.fingerprint)
+        vacancies.append(job)
     settings = WebSettings(directory, ("http://smoke.test",))
     app = create_app(settings, database=database)
     clients = [
@@ -140,6 +138,20 @@ async def exercise(database, directory, gateway):
             )
             require(login.status_code == 200, "Smoke login failed")
             client.headers["x-csrf-token"] = login.json()["csrf_token"]
+            job = vacancies[index]
+            added = await client.post(
+                "/api/manual-jobs",
+                json={
+                    "title": job.title,
+                    "company": job.company,
+                    "location": job.location,
+                    "description": job.description,
+                    "url": job.url,
+                    "request_id": "smoke-manual",
+                },
+            )
+            require(added.status_code == 201, "Manual smoke vacancy was not saved")
+            identifiers.append(added.json()["id"])
             uploaded = await client.post(
                 "/api/template-drafts",
                 files={
@@ -185,7 +197,10 @@ async def exercise(database, directory, gateway):
                 sessions.add(identifier)
             for artifact in task["artifacts"]:
                 response = await client.get(f"/api/artifacts/{artifact['id']}/download")
-                require(response.status_code == 200, "Verified smoke artifact is not downloadable")
+                require(
+                    response.status_code == 200,
+                    f"Verified smoke artifact is not downloadable (HTTP {response.status_code})",
+                )
                 foreign = await clients[1 - index].get(f"/api/artifacts/{artifact['id']}/download")
                 require(foreign.status_code == 404, "Foreign smoke artifact was disclosed")
                 if artifact["format"] == "pdf":
@@ -238,8 +253,10 @@ async def exercise(database, directory, gateway):
             "Negative document was not blocked",
         )
         require(store.task(task["id"])["artifacts"] == [], "Negative document published artifacts")
-        denied = await clients[0].get(f"/api/tasks/{task['id']}/draft")
+        denied = await clients[0].get(f"/api/tasks/{task['id']}/document-preview")
         require(denied.status_code == 404, "Negative smoke draft was published")
+        denied_file = await clients[0].get(f"/api/artifacts/{task['id']}/download")
+        require(denied_file.status_code == 404, "Negative smoke file was downloadable")
         return {
             "users": 2,
             "positive_documents": 2,
@@ -261,7 +278,9 @@ async def run(credentials_dir):
         database.migrate()
         migrated = True
         with tempfile.TemporaryDirectory(prefix="job-live-smoke-") as directory:
-            result = await exercise(database, Path(directory), AgentGateway(settings=credentials))
+            result = await exercise(
+                database, Path(directory).resolve(), AgentGateway(settings=credentials)
+            )
             return {**result, "provider": "live_openai"}
     finally:
         try:

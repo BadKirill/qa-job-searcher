@@ -299,7 +299,9 @@ tasks = owned(
     ForeignKeyConstraint(
         ["user_id", "conversation_id"], ["conversations.user_id", "conversations.id"]
     ),
-    CheckConstraint("kind IN ('search','chat','cv','cover_letter')", name="task_kind"),
+    CheckConstraint(
+        "kind IN ('search','chat','cv','cover_letter','posting_check')", name="task_kind"
+    ),
     CheckConstraint(
         "status IN ('queued','running','verifying','rendering','ready','failed',"
         "'needs_input','blocked','cancelled','deleted')",

@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Request } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -121,90 +121,98 @@ async function accept(page: Page, token: string) {
   ).toBeVisible();
 }
 
-test("a saved design example survives reload and previous criteria remain visible", async ({ page, browser }) => {
+test("an example is a draft and the original named revision remains selectable on mobile", async ({ page, browser }) => {
   await signIn(page);
   const invitation = await invite(page, "profile-version-designer");
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   try {
     const member = await context.newPage();
     await accept(member, invitation.token);
-    const openCriteria = () => member.getByRole("button", { name: "Настроить критерии" }).click();
+    const openCriteria = () => member.getByRole("button", { name: "Настройки поиска" }).click();
     await openCriteria();
     const examples = member.getByLabel("Пример профиля", { exact: true });
-    const historyTitle = member.getByText("История версий профиля", { exact: true });
-    const history = member.locator(".profile-history > summary");
-    await expect(history).toBeInViewport();
-    await expect(historyTitle).toHaveCSS("font-size", "20px");
-    await expect(history).toHaveAccessibleDescription("Здесь появятся ваши сохранённые критерии");
-    await expect(examples).toHaveValue("");
-    await examples.selectOption("designer");
-    await member.getByRole("button", { name: "Применить пример" }).click();
-    await expect(member.getByText("Пример применён. Критерии сохранены в вашем аккаунте.")).toBeVisible();
-    const startupReads = ["/api/profile", "/api/jobs", "/api/tasks", "/api/workspace"];
-    const startupPaths = new Set([...startupReads, "/api/events"]);
-    const startupRequests = new Set<Request>();
-    const failures: string[] = [];
-    let reloaded = false;
-    const markReload = () => {
-      reloaded = true;
-    };
-    const recordRequest = (request: Request) => {
-      if (reloaded && startupPaths.has(new URL(request.url()).pathname)) {
-        startupRequests.add(request);
-      }
-    };
-    const recordFailure = (request: Request) => {
-      if (startupRequests.has(request)) failures.push(new URL(request.url()).pathname);
-    };
-    member.once("framenavigated", markReload);
-    member.on("request", recordRequest);
-    member.on("requestfailed", recordFailure);
-    const startupResponses = [...startupPaths].map((path) =>
-      member.waitForResponse((response) =>
-        startupRequests.has(response.request()) &&
-        new URL(response.url()).pathname === path && response.ok(),
-      ),
-    );
-    await member.reload();
-    await Promise.all(startupResponses);
-    expect(failures).toEqual([]);
-    member.off("request", recordRequest);
-    member.off("requestfailed", recordFailure);
-    await expect(member.getByText("Критерии поиска сохранены")).toBeVisible();
-    await openCriteria();
-    await expect(examples).toHaveValue("designer");
-    await expect(examples).toHaveCSS("appearance", "none");
-    await expect(examples).toHaveCSS("padding-right", "40px");
     const roles = member.getByLabel("Названия ролей и синонимы");
+    await examples.selectOption("designer");
+    await member.getByRole("button", { name: "Подставить пример" }).click();
     await expect(roles).toHaveValue("product designer, ux designer");
-    const queries = member.getByLabel("Запросы к агрегаторам (до 8)");
-    await expect(queries).toHaveValue("");
-    await expect(queries).toHaveAccessibleDescription("(если пусто, используются первые 8 названий ролей)");
-    await roles.fill("brand designer");
-    await member.getByRole("button", { name: "Сохранить профиль поиска" }).click();
-    await expect(member.getByText("Профиль поиска сохранён.")).toBeVisible();
+    await expect(member.getByLabel("Навыки")).toHaveValue("figma");
+    expect((await (await member.request.get(`${origin}/api/search-profile/history`)).json()).items).toHaveLength(0);
+    expect((await (await member.request.get(`${origin}/api/sources`)).json()).items).toHaveLength(0);
+    await member.getByRole("button", { name: "Сохранить как новую версию" }).click();
+    let dialog = member.getByRole("dialog", { name: "Новая версия профиля" });
+    await dialog.getByLabel("Имя варианта").fill("Дизайн продукта");
+    await dialog.getByRole("button", { name: "Сохранить", exact: true }).click();
+    await expect(member.getByText(/^Сохранено · Дизайн продукта/)).toBeVisible();
+    await member.reload();
+    await openCriteria();
+    await expect(roles).toHaveValue("product designer, ux designer");
     await expect(examples).toHaveValue("");
-    await expect(history).toHaveAccessibleDescription("В поиске используется версия 2");
-    await history.focus();
-    await member.keyboard.press("Enter");
-    await member.getByText("Версия 1", { exact: true }).click();
-    await expect(member.getByText("product designer, ux designer", { exact: true })).toBeVisible();
-    await member.getByText("Версия 2 · используется в поиске", { exact: true }).click();
-    await expect(member.getByText("brand designer", { exact: true })).toBeVisible();
-    await member.getByRole("button", { name: "Источники", exact: true }).click();
-    await expect(history).toHaveCount(0);
-    await expect(member.getByRole("option", { name: "Remotive · уже подключён" })).toBeDisabled();
-    await expect(member.getByRole("button", { name: "Добавить источник", exact: true })).toBeDisabled();
+    await member.getByLabel("Порог совпадения с критериями").scrollIntoViewIfNeeded();
+    await expect(member.getByRole("button", { name: "Сохранить", exact: true })).toBeInViewport();
+    await roles.fill("brand designer");
+    await member.getByRole("button", { name: "Сохранить", exact: true }).click();
+    await expect(member.getByText(/^Сохранено · Дизайн продукта/)).toBeVisible();
+    await member.getByText("История версий профиля", { exact: true }).click();
+    const version = member.locator(".profile-versions [data-version='1']");
+    await version.locator("summary").click();
+    await version.getByRole("button", { name: "Загрузить в форму" }).click();
+    await expect(roles).toHaveValue("product designer, ux designer");
+    await version.getByRole("button", { name: "Использовать в поиске" }).click();
+    await expect(version).toHaveAttribute("data-active", "true");
+    const saved = await (await member.request.get(`${origin}/api/search-profile`)).json();
+    expect(saved.version).toBe(1);
+    await member.getByRole("button", { name: "Сохранить как новую версию" }).click();
+    dialog = member.getByRole("dialog", { name: "Новая версия профиля" });
+    await dialog.getByLabel("Имя варианта").fill("Другой вариант");
+    await dialog.getByRole("button", { name: "Сохранить", exact: true }).click();
+    await expect(member.getByText(/^Сохранено · Другой вариант/)).toBeVisible();
+    const third = member.locator(".profile-versions [data-version='3']");
+    await third.locator("summary").click();
+    await third.getByRole("button", { name: "Удалить вариант" }).click();
+    dialog = member.getByRole("dialog", { name: "Удалить вариант из списка?" });
+    await dialog.getByRole("button", { name: "Отмена" }).click();
+    await expect(third).toBeVisible();
+    await third.getByRole("button", { name: "Удалить вариант" }).click();
+    await dialog.getByRole("button", { name: "Удалить" }).click();
+    await expect(third).toHaveCount(0);
   } finally {
     await context.close();
   }
 });
 
+async function choosePlace(page: Page, field: string, term: string, option: string | RegExp) {
+  const input = page.getByRole("combobox", { name: field, exact: true });
+  await input.fill(term);
+  await page.getByRole("option", { name: option }).click();
+}
+
+async function applyExample(page: Page, preset: string) {
+  await page.getByLabel("Пример профиля").selectOption(preset);
+  await page.getByRole("button", { name: "Подставить пример" }).click();
+  await page.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await expect(page.getByText(/^Сохранено ·/)).toBeVisible();
+  await page.getByRole("button", { name: "Подключить рекомендованный набор" }).click();
+  await page.getByRole("dialog", { name: "Рекомендованные источники" })
+    .getByRole("button", { name: "Подключить", exact: true }).click();
+  await expect(page.getByText("Подключено источников · 5")).toBeVisible();
+}
+
+async function addBoard(page: Page, token: string, name?: string, region = "global") {
+  await page.getByRole("button", { name: "Указать параметры вручную" }).click();
+  const dialog = page.getByRole("dialog", { name: "Добавить подключение" });
+  await dialog.getByLabel("Тип источника").selectOption("lever");
+  await dialog.getByLabel("Идентификатор доски").fill(token);
+  if (name) await dialog.getByLabel("Название компании").fill(name);
+  await dialog.getByLabel("Регион").selectOption(region);
+  await dialog.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await expect(page.getByText("Источник сохранён.")).toBeVisible();
+}
+
 function pythonBytes(script: string, input?: Buffer) {
   return execFileSync(
     process.env.QA_E2E_PYTHON || "../.venv/bin/python",
     ["-c", script],
-    { input },
+    { input, maxBuffer: 16 * 1024 * 1024 },
   );
 }
 
@@ -273,19 +281,9 @@ test("two professions generate independent documents, revise their own chats and
     for (const [index, person] of people.entries()) {
       await accept(person.page, invitations[index].token);
       await person.page
-        .getByRole("button", { name: "Поиск и источники" })
+        .getByRole("button", { name: "Настройки поиска" })
         .click();
-      await person.page
-        .getByLabel("Пример профиля")
-        .selectOption(person.preset);
-      await person.page
-        .getByRole("button", { name: "Применить пример" })
-        .click();
-      await expect(
-        person.page.getByText(
-          "Пример применён. Критерии сохранены в вашем аккаунте.",
-        ),
-      ).toBeVisible();
+      await applyExample(person.page, person.preset);
       await activatePersonalCV(person.page, person.name, person.experience);
       await person.page
         .getByRole("button", { name: /Вакансии/ })
@@ -446,17 +444,9 @@ test("two invited accounts keep independent workspaces, files and sessions on on
       [developer, "developer"],
     ] as const) {
       await memberPage
-        .getByRole("button", { name: "Поиск и источники" })
+        .getByRole("button", { name: "Настройки поиска" })
         .click();
-      await memberPage.getByLabel("Пример профиля").selectOption(preset);
-      await memberPage
-        .getByRole("button", { name: "Применить пример" })
-        .click();
-      await expect(
-        memberPage.getByText(
-          "Пример применён. Критерии сохранены в вашем аккаунте.",
-        ),
-      ).toBeVisible();
+      await applyExample(memberPage, preset);
       await memberPage
         .getByRole("button", { name: /Вакансии/ })
         .first()
@@ -733,23 +723,14 @@ test("personal settings drive real source adapters and matching, persist version
     await accept(junior, first.token);
     await accept(office, second.token);
     for (const member of [junior, office]) {
-      await member.getByRole("button", { name: "Поиск и источники" }).click();
+      await member.getByRole("button", { name: "Настройки поиска" }).click();
       await expect(
         member.getByText("Источники пока не добавлены."),
       ).toBeVisible();
       await expect(member.getByLabel("Названия ролей и синонимы")).toHaveValue(
         "",
       );
-      await member.getByLabel("Тип источника").selectOption("lever");
-      await member.getByLabel("Идентификатор доски").fill("synthetic_company");
-      await member.getByLabel("Название подключения").fill("Личная доска");
-      await member.getByLabel("Регион API").selectOption("eu");
-      await member
-        .getByRole("button", { name: "Добавить источник", exact: true })
-        .click();
-      await expect(
-        member.getByRole("heading", { name: "Личная доска" }),
-      ).toBeVisible();
+      await addBoard(member, "synthetic_company", "Личная доска", "eu");
     }
     await junior
       .getByLabel("Названия ролей и синонимы")
@@ -757,27 +738,19 @@ test("personal settings drive real source adapters and matching, persist version
     await office
       .getByLabel("Названия ролей и синонимы")
       .fill("product designer");
-    for (const member of [junior, office]) {
-      await member.getByLabel("Удалённо", { exact: true }).uncheck();
-      await member
-        .getByLabel("Подходящие страны и регионы")
-        .fill("germany, berlin");
-      await member.getByLabel("Где вы можете работать").fill("germany");
-    }
-    await junior.getByLabel("Гибрид", { exact: true }).check();
-    await junior.getByLabel("Города для гибридной работы").fill("berlin");
-    await office.getByLabel("В офисе", { exact: true }).check();
+    await choosePlace(junior, "Где готов ездить в офис при гибриде", "Berlin", /^Берлин, Германия$/);
+    await choosePlace(office, "Где готов работать в офисе", "Berlin", /^Берлин, Германия$/);
     for (const member of [junior, office]) {
       await member
-        .getByRole("button", { name: "Сохранить профиль поиска" })
+        .getByRole("button", { name: "Сохранить", exact: true })
         .click();
-      await expect(member.getByText("Профиль поиска сохранён.")).toBeVisible();
+      await expect(member.getByText(/^Сохранено ·/) ).toBeVisible();
       await member
         .getByRole("button", { name: "Проверить Личная доска" })
         .click();
       await expect(
         member.getByText(
-          /Источник доступен. Объявлений в проверенном ответе: 3/,
+          /Источник доступен. Объявлений в пробном ответе: 3/,
         ),
       ).toBeVisible();
       expect(
@@ -786,18 +759,18 @@ test("personal settings drive real source adapters and matching, persist version
     }
     const stale = await contexts[0].newPage();
     await stale.goto(origin);
-    await stale.getByRole("button", { name: "Поиск и источники" }).click();
+    await stale.getByRole("button", { name: "Настройки поиска" }).click();
     await expect(stale.getByLabel("Названия ролей и синонимы")).toHaveValue(
       "backend engineer",
     );
     await junior.getByLabel("Навыки").fill("python");
     await junior
-      .getByRole("button", { name: "Сохранить профиль поиска" })
+      .getByRole("button", { name: "Сохранить", exact: true })
       .click();
-    await expect(junior.getByText("Профиль поиска сохранён.")).toBeVisible();
+    await expect(junior.getByText(/^Сохранено ·/) ).toBeVisible();
     await stale.getByLabel("Навыки").fill("draft stale");
     await stale
-      .getByRole("button", { name: "Сохранить профиль поиска" })
+      .getByRole("button", { name: "Сохранить", exact: true })
       .click();
     await expect(stale.getByRole("alert")).toContainText(
       "Настройки изменились в другой вкладке",
@@ -806,6 +779,13 @@ test("personal settings drive real source adapters and matching, persist version
     await stale
       .getByRole("button", { name: "Загрузить актуальные настройки" })
       .click();
+    await expect(stale.getByLabel("Навыки")).toHaveValue("draft stale");
+    await stale.getByText("История версий профиля", { exact: true }).click();
+    const latest = stale.locator(".profile-versions [data-active='true']");
+    await latest.locator("summary").click();
+    await latest.getByRole("button", { name: "Загрузить в форму" }).click();
+    await stale.getByRole("dialog", { name: "Заменить несохранённые поля?" })
+      .getByRole("button", { name: "Заменить", exact: true }).click();
     await expect(stale.getByLabel("Навыки")).toHaveValue("python");
     const sources = (
       await (await junior.request.get(`${origin}/api/sources`)).json()
@@ -847,18 +827,19 @@ test("personal settings drive real source adapters and matching, persist version
         member.getByRole("article", { name: title, exact: true }),
       ).toBeVisible();
     }
-    await junior.getByRole("button", { name: "Поиск и источники" }).click();
+    await junior.getByRole("button", { name: "Настройки поиска" }).click();
     await junior.getByRole("button", { name: "Изменить Личная доска" }).click();
-    await junior.getByLabel("Идентификатор доски").fill("../private");
-    await junior.getByRole("button", { name: "Сохранить подключение" }).click();
-    await expect(junior.getByRole("alert")).toContainText(
+    const edit = junior.getByRole("dialog", { name: "Изменить подключение" });
+    await edit.getByLabel("Идентификатор доски").fill("../private");
+    await edit.getByRole("button", { name: "Сохранить", exact: true }).click();
+    await expect(edit.getByRole("alert")).toContainText(
       "Нужен идентификатор доски, а не URL",
     );
-    await junior.getByLabel("Идентификатор доски").fill("synthetic_updated");
-    await junior.getByRole("button", { name: "Сохранить подключение" }).click();
+    await edit.getByLabel("Идентификатор доски").fill("synthetic_updated");
+    await edit.getByRole("button", { name: "Сохранить", exact: true }).click();
     await expect(junior.getByText("Источник сохранён.")).toBeVisible();
-    await junior.getByLabel("Включить Личная доска").click();
-    await expect(junior.getByLabel("Включить Личная доска")).not.toBeChecked();
+    await junior.getByRole("button", { name: "Выключить Личная доска" }).click();
+    await expect(junior.getByRole("button", { name: "Включить Личная доска" })).toBeVisible();
     expect(
       (
         await junior.request.post(`${origin}/api/search-runs`, {
@@ -867,6 +848,8 @@ test("personal settings drive real source adapters and matching, persist version
       ).status(),
     ).toBe(409);
     await junior.getByRole("button", { name: "Удалить Личная доска" }).click();
+    await junior.getByRole("dialog", { name: "Удалить Личная доска?" })
+      .getByRole("button", { name: "Удалить", exact: true }).click();
     await expect(
       junior.getByText("Источники пока не добавлены."),
     ).toBeVisible();
@@ -882,28 +865,22 @@ test("personal settings drive real source adapters and matching, persist version
     expect(
       (await (await office.request.get(`${origin}/api/sources`)).json()).items,
     ).toHaveLength(1);
-    await junior.getByLabel("Тип источника").selectOption("telegram");
-    await junior
-      .getByLabel("Handle публичного канала")
-      .fill("https://127.0.0.1/private");
-    await junior
-      .getByRole("button", { name: "Добавить источник", exact: true })
-      .click();
-    await expect(junior.getByRole("alert")).toContainText(
-      "Нужен handle канала, а не URL",
-    );
-    await junior.getByLabel("Handle публичного канала").fill("public_jobs");
-    await junior
-      .getByRole("button", { name: "Добавить источник", exact: true })
-      .click();
+    await junior.getByRole("button", { name: "Указать параметры вручную" }).click();
+    const channel = junior.getByRole("dialog", { name: "Добавить подключение" });
+    await channel.getByLabel("Тип источника").selectOption("telegram");
+    await channel.getByLabel("Канал Telegram").fill("https://127.0.0.1/private");
+    await channel.getByRole("button", { name: "Сохранить", exact: true }).click();
+    await expect(channel.getByRole("alert")).toContainText("Нужен handle канала, а не URL");
+    await channel.getByLabel("Канал Telegram").fill("public_jobs");
+    await channel.getByRole("button", { name: "Сохранить", exact: true }).click();
     await junior
       .getByRole("button", { name: "Проверить Telegram · @public_jobs" })
       .click();
     await expect(
-      junior.getByText("Источник доступен, проверенный ответ пуст."),
+      junior.getByText("Источник ответил. Пробная выборка пуста."),
     ).toBeVisible();
     await junior.reload();
-    await junior.getByRole("button", { name: "Поиск и источники" }).click();
+    await junior.getByRole("button", { name: "Настройки поиска" }).click();
     await expect(
       junior.getByRole("heading", { name: "Telegram · @public_jobs" }),
     ).toBeVisible();
@@ -913,16 +890,11 @@ test("personal settings drive real source adapters and matching, persist version
 });
 
 async function configureSearch(page: Page, token: string) {
-  await page.getByRole("button", { name: "Поиск и источники" }).click();
+  await page.getByRole("button", { name: "Настройки поиска" }).click();
   await page.getByLabel("Названия ролей и синонимы").fill("backend engineer");
-  await page.getByRole("button", { name: "Сохранить профиль поиска" }).click();
-  await expect(page.getByText("Профиль поиска сохранён.")).toBeVisible();
-  await page.getByLabel("Тип источника").selectOption("lever");
-  await page.getByLabel("Идентификатор доски").fill(token);
-  await page
-    .getByRole("button", { name: "Добавить источник", exact: true })
-    .click();
-  await expect(page.getByText("Источник сохранён.")).toBeVisible();
+  await page.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await expect(page.getByText(/^Сохранено ·/) ).toBeVisible();
+  await addBoard(page, token);
   await page
     .getByRole("button", { name: /Вакансии/ })
     .first()
@@ -966,14 +938,14 @@ test("working language choices persist and filter searches by declared or inferr
     const jobCards = member.getByRole("article");
     const russian = member.getByRole("checkbox", { name: "Русскоязычные" });
     const english = member.getByRole("checkbox", { name: "Англоязычные" });
-    const openCriteria = () => member.getByRole("button", { name: "Поиск и источники" }).click();
+    const openCriteria = () => member.getByRole("button", { name: "Настройки поиска" }).click();
     const search = async () => {
       await launchSearch(member);
       await member.getByRole("button", { name: /Показать свежую выдачу/ }).click();
     };
     const save = async () => {
-      await member.getByRole("button", { name: "Сохранить профиль поиска" }).click();
-      await expect(member.getByText("Профиль поиска сохранён.")).toBeVisible();
+      await member.getByRole("button", { name: "Сохранить", exact: true }).click();
+      await expect(member.getByText(/^Сохранено ·/) ).toBeVisible();
     };
     const showMatches = async (labels: string[]) => {
       await expect(jobCards).toHaveCount(labels.length);
@@ -995,7 +967,7 @@ test("working language choices persist and filter searches by declared or inferr
     await expect(russian).toBeChecked();
     await expect(english).not.toBeChecked();
     await member.getByText("История версий профиля", { exact: true }).click();
-    await member.getByText("Версия 2 · используется в поиске", { exact: true }).click();
+    await member.locator(".profile-versions [data-version='2'] summary").click();
     await expect(member.locator(".profile-versions").getByText("Русскоязычные", { exact: true })).toBeVisible();
     await member.getByRole("button", { name: /Вакансии/ }).first().click();
     await search();
@@ -1286,14 +1258,14 @@ test("a run with changed settings is saved as superseded without publishing its 
             .status,
       )
       .toBe("running");
-    await member.getByRole("button", { name: "Поиск и источники" }).click();
+    await member.getByRole("button", { name: "Настройки поиска" }).click();
     await member
       .getByLabel("Названия ролей и синонимы")
       .fill("product designer");
     await member
-      .getByRole("button", { name: "Сохранить профиль поиска" })
+      .getByRole("button", { name: "Сохранить", exact: true })
       .click();
-    await expect(member.getByText("Профиль поиска сохранён.")).toBeVisible();
+    await expect(member.getByText(/^Сохранено ·/) ).toBeVisible();
     await expect
       .poll(
         async () =>
@@ -1356,7 +1328,7 @@ test("a new mobile member configures separate pages with keyboard, gets a first 
     await criteria.focus();
     await member.keyboard.press("Enter");
     await expect(
-      member.getByRole("heading", { name: "Что ищу", exact: true }),
+      member.getByRole("heading", { name: "Критерии", exact: true }),
     ).toBeFocused();
     await expect(member.getByLabel("Названия ролей и синонимы")).toBeVisible();
     await expect(
@@ -1365,12 +1337,11 @@ test("a new mobile member configures separate pages with keyboard, gets a first 
     await member
       .getByLabel("Названия ролей и синонимы")
       .fill("product designer");
-    await member.getByLabel("Подходящие страны и регионы").fill("Europe");
-    await member.getByLabel("Где вы можете работать").fill("Serbia");
+    await choosePlace(member, "Откуда могу работать удалённо", "Serbia", "Сербия");
     await member
-      .getByRole("button", { name: "Сохранить профиль поиска" })
+      .getByRole("button", { name: "Сохранить", exact: true })
       .click();
-    await expect(member.getByText("Профиль поиска сохранён.")).toBeVisible();
+    await expect(member.getByText(/^Сохранено ·/) ).toBeVisible();
     const sections = member.getByRole("navigation", { name: "Разделы поиска" });
     await sections
       .getByRole("button", { name: "Источники", exact: true })
@@ -1381,19 +1352,9 @@ test("a new mobile member configures separate pages with keyboard, gets a first 
     await expect(
       member.getByText("Источники пока не добавлены."),
     ).toBeVisible();
-    await member
-      .getByRole("button", { name: "Добавить источник", exact: true })
-      .click();
-    await expect(
-      member.getByRole("heading", { name: "Remotive", exact: true }),
-    ).toBeVisible();
+    await member.getByRole("button", { name: "Включить Remotive", exact: true }).click();
     const longName = "PersonalDesignerBoard".repeat(4);
-    await member.getByLabel("Тип источника").selectOption("lever");
-    await member.getByLabel("Идентификатор доски").fill("synthetic_company");
-    await member.getByLabel("Название подключения").fill(longName);
-    await member
-      .getByRole("button", { name: "Добавить источник", exact: true })
-      .click();
+    await addBoard(member, "synthetic_company", longName);
     await expect(
       member.getByRole("heading", { name: longName, exact: true }),
     ).toBeVisible();
@@ -1407,7 +1368,7 @@ test("a new mobile member configures separate pages with keyboard, gets a first 
       ),
     ).toBe(true);
     await sections
-      .getByRole("button", { name: "Что ищу", exact: true })
+      .getByRole("button", { name: "Критерии", exact: true })
       .click();
     await member
       .getByLabel("Названия ролей и синонимы")
@@ -1416,15 +1377,15 @@ test("a new mobile member configures separate pages with keyboard, gets a first 
       .getByRole("button", { name: "Источники", exact: true })
       .click();
     await sections
-      .getByRole("button", { name: "Что ищу", exact: true })
+      .getByRole("button", { name: "Критерии", exact: true })
       .click();
     await expect(member.getByLabel("Названия ролей и синонимы")).toHaveValue(
       "product designer, UX designer",
     );
     await member
-      .getByRole("button", { name: "Сохранить профиль поиска" })
+      .getByRole("button", { name: "Сохранить", exact: true })
       .click();
-    await expect(member.getByText("Профиль поиска сохранён.")).toBeVisible();
+    await expect(member.getByText(/^Сохранено ·/) ).toBeVisible();
     await member
       .getByRole("button", { name: /Вакансии/ })
       .first()
@@ -1649,7 +1610,7 @@ test("layout stays aligned across workspace pages and viewport sizes", async ({ 
       for (const panel of await target.locator(".search-settings fieldset").all()) {
         if (!(await panel.isVisible())) continue;
         const panelBox = await panel.boundingBox();
-        const titleBox = await panel.locator("legend").boundingBox();
+        const titleBox = await panel.locator(":scope > legend").boundingBox();
         expect(titleBox!.y - panelBox!.y).toBeGreaterThanOrEqual(16);
         expect(titleBox!.x - panelBox!.x).toBeGreaterThanOrEqual(16);
         expect(titleBox!.x + titleBox!.width).toBeLessThanOrEqual(panelBox!.x + panelBox!.width - 16);
@@ -1737,10 +1698,10 @@ test("layout stays aligned across workspace pages and viewport sizes", async ({ 
       await member.setViewportSize({ width, height: 1050 });
       for (const [button, heading, image] of [
         ["Вакансии", "Подходящие вакансии.", "jobs"],
-        ["Applied", "Applied.", "applied"],
+        ["Отклики", "Отклики.", "applied"],
         ["Архив", "Архив вакансий.", "archive"],
         ["Профиль и шаблон", "Профиль и шаблон", "profile"],
-        ["Поиск и источники", "Поиск и источники", "criteria"],
+        ["Настройки поиска", "Настройки поиска", "criteria"],
         ["Аккаунт и доступ", "Аккаунт и доступ", "account"],
       ]) {
         await member.getByRole("navigation", { name: "Основная навигация" }).getByRole("button", { name: new RegExp(button) }).click();
@@ -1771,14 +1732,14 @@ test("layout stays aligned across workspace pages and viewport sizes", async ({ 
         }
         if (image === "criteria") {
           await member.getByRole("button", { name: "Источники", exact: true }).click();
-          const checkbox = member.locator(".source-list .checkbox-row").first();
-          const labelBox = await checkbox.boundingBox();
-          const inputBox = await checkbox.getByRole("checkbox").boundingBox();
-          expect(inputBox!.x).toBeLessThan(labelBox!.x + 2);
-          expect(inputBox!.width).toBeLessThanOrEqual(20);
+          const sourceToggle = member.getByRole("button", { name: /^Выключить VeryLongSourceName/ });
+          await expect(sourceToggle).toBeVisible();
+          const toggleBox = await sourceToggle.boundingBox();
+          expect(toggleBox!.height).toBeGreaterThanOrEqual(44);
+          expect(toggleBox!.x + toggleBox!.width).toBeLessThanOrEqual(width + 1);
           await contained(member);
           await member.screenshot({ path: `test-results/design-sources-${width}.png`, fullPage: true });
-          await member.getByRole("button", { name: "Что ищу", exact: true }).click();
+          await member.getByRole("button", { name: "Критерии", exact: true }).click();
           await contained(member);
         }
         if (image === "account") {
@@ -1824,5 +1785,206 @@ test("layout stays aligned across workspace pages and viewport sizes", async ({ 
     }
   } finally {
     await Promise.all([context.close(), guest.close()]);
+  }
+});
+
+test("manual vacancy preview saves privately and both documents use the checked pipeline", async ({ page, browser }) => {
+  await signIn(page);
+  const invitation = await invite(page, "feedback-manual");
+  const context = await browser.newContext({ acceptDownloads: true });
+  try {
+    const member = await context.newPage();
+    await accept(member, invitation.token);
+    await member.getByRole("button", { name: "Добавить вакансию" }).click();
+    let dialog = member.getByRole("dialog", { name: "Добавить вакансию" });
+    await dialog.getByLabel("Ссылка на вакансию").fill("https://job-boards.greenhouse.io/stage-feedback/jobs/100");
+    await dialog.getByRole("button", { name: "Получить предпросмотр" }).click();
+    await expect(dialog.getByLabel("Название вакансии")).toHaveValue("Platform Specialist");
+    expect((await (await member.request.get(`${origin}/api/jobs?tab=manual`)).json()).total).toBe(0);
+    await dialog.getByRole("button", { name: "Сохранить вакансию" }).click();
+    let card = member.getByRole("article", { name: "Platform Specialist", exact: true });
+    await expect(card).toBeVisible();
+    await card.getByRole("button", { name: "Сделать CV", exact: true }).click();
+    await card.getByRole("button", { name: "Открыть профиль" }).click();
+    await activatePersonalCV(member, "Manual Candidate", "I built reliable educational platforms with Python.");
+    await member.getByRole("button", { name: "Вернуться к добавленным вакансиям" }).click();
+    card = member.getByRole("article", { name: "Platform Specialist", exact: true });
+    await card.getByRole("button", { name: "Сделать CV", exact: true }).click();
+    await card.getByRole("button", { name: "Сделать кавер леттер", exact: true }).click();
+    await expect(card.getByRole("link", { name: "Скачать PDF" })).toHaveCount(2);
+    const received = member.waitForEvent("download");
+    await card.getByRole("link", { name: "Скачать PDF" }).first().click();
+    expect(await (await received).failure()).toBeNull();
+    const job = (await (await member.request.get(`${origin}/api/jobs?tab=manual`)).json()).items[0];
+    expect((await page.request.post(`${origin}/api/jobs/${job.id}/check-posting`, {
+      headers: await headers(page), data: { request_id: "foreign-posting" },
+    })).status()).toBe(404);
+    await member.getByRole("button", { name: "Добавить вакансию" }).click();
+    dialog = member.getByRole("dialog", { name: "Добавить вакансию" });
+    await dialog.getByLabel("Ссылка на вакансию").fill("https://example.test/absent");
+    await dialog.getByRole("button", { name: "Получить предпросмотр" }).click();
+    await expect(dialog.getByText(/Вставьте текст вакансии/)).toBeVisible();
+    await dialog.getByLabel("Название вакансии").fill("Platform Specialist by text");
+    await dialog.getByLabel("Компания").fill("Example Company");
+    await dialog.getByLabel("Описание вакансии").fill("Build reliable software with Python and test releases before deploying them.");
+    await dialog.getByRole("button", { name: "Сохранить вакансию" }).click();
+    await member.reload();
+    await member.getByRole("button", { name: "Добавленные вручную" }).click();
+    await expect(member.getByRole("article", { name: "Platform Specialist by text" })).toBeVisible();
+    await expect(member.getByRole("link", { name: "Скачать PDF" })).toHaveCount(2);
+  } finally {
+    await context.close();
+  }
+});
+
+test("CSV preview allows partial confirmation and a second import reports its duplicate", async ({ page, browser }) => {
+  await signIn(page);
+  const invitation = await invite(page, "feedback-import");
+  const context = await browser.newContext();
+  try {
+    const member = await context.newPage();
+    await accept(member, invitation.token);
+    await member.getByRole("button", { name: "Настройки поиска" }).click();
+    await member.getByText("Импортировать компании и источники", { exact: true }).click();
+    await member.getByLabel("Файл CSV").setInputFiles({
+      name: "sources.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from("Компания,Ссылка,Теги\nBoard,https://jobs.eu.lever.co/example,design\nChannel,https://t.me/public_jobs,remote\nDup,@public_jobs,\nUnknown,,\n"),
+    });
+    const preview = () => member.getByRole("button", { name: "Предпросмотр импорта" }).click();
+    await preview();
+    const rows = member.getByRole("list", { name: "Строки импорта" });
+    await expect(rows.getByRole("checkbox", { name: /Укажите карьерную страницу/ })).toBeDisabled();
+    await expect(rows.getByRole("checkbox", { name: /Dup/ })).toBeDisabled();
+    await rows.getByRole("checkbox", { name: /Board/ }).uncheck();
+    await member.getByRole("button", { name: "Добавить выбранные" }).click();
+    await expect(member.getByRole("heading", { name: "Telegram · @public_jobs" })).toBeVisible();
+    await expect(member.getByRole("heading", { name: "Board", exact: true })).toHaveCount(0);
+    await preview();
+    await expect(rows.getByRole("checkbox", { name: /Channel/ })).toBeDisabled();
+    await expect(rows.getByRole("checkbox", { name: /Board/ })).toBeChecked();
+  } finally {
+    await context.close();
+  }
+});
+
+test("geography and required hours filter the actual search with keyboard selection", async ({ page, browser }) => {
+  await signIn(page);
+  const invitation = await invite(page, "feedback-geography");
+  const context = await browser.newContext();
+  try {
+    const member = await context.newPage();
+    await accept(member, invitation.token);
+    await configureSearch(member, "stage-feedback-geography");
+    await member.getByRole("button", { name: "Настройки поиска" }).click();
+    const input = member.getByRole("combobox", { name: "Откуда могу работать удалённо" });
+    await input.fill("Tbilsi");
+    await expect(member.getByText("Возможно, вы имели в виду", { exact: true })).toBeVisible();
+    await input.press("ArrowDown");
+    await input.press("Enter");
+    await expect(member.getByRole("button", { name: "Убрать Тбилиси, Грузия" })).toBeVisible();
+    const preference = member.getByRole("combobox", { name: "Предпочтения по локации вакансии" });
+    await preference.fill("ме");
+    await expect(member.getByRole("option", { name: /MENA · Ближний Восток/ })).toBeVisible();
+    await preference.fill("");
+    await member.getByText("Часы доступности", { exact: true }).click();
+    await member.getByRole("checkbox", { name: "Учитывать часы доступности" }).check();
+    await member.getByLabel("Часовой пояс", { exact: true }).fill("Asia/Tbilisi");
+    await member.getByLabel("Доступен с", { exact: true }).fill("09:00");
+    await member.getByLabel("Доступен до", { exact: true }).fill("17:00");
+    await member.getByLabel("Показывать удалённые вакансии с неясной географией").check();
+    await member.getByRole("button", { name: "Сохранить", exact: true }).click();
+    await expect(member.getByText(/^Сохранено ·/)).toBeVisible();
+    await member.getByRole("button", { name: /Вакансии/ }).first().click();
+    await launchSearch(member);
+    await member.getByRole("button", { name: /Показать свежую выдачу/ }).click();
+    const cards = member.getByRole("article");
+    await expect(cards).toHaveCount(4);
+    await expect(member.getByRole("article", { name: "Backend Engineer · Europe", exact: true })).toContainText("Проверьте географию");
+    await expect(member.getByRole("article", { name: "Backend Engineer · Incomplete hours", exact: true })).toContainText("Проверьте рабочие часы");
+    await expect(member.getByRole("article", { name: "Backend Engineer · US team", exact: true })).toBeVisible();
+    await expect(member.getByRole("article", { name: "Backend Engineer · Serbia or Georgia", exact: true })).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});
+
+test("original ATS enriches a fragment while closed and unverifiable results stay distinct", async ({ page, browser }) => {
+  await signIn(page);
+  const invitation = await invite(page, "feedback-posting");
+  const context = await browser.newContext();
+  try {
+    const member = await context.newPage();
+    await accept(member, invitation.token);
+    await member.getByRole("button", { name: "Настройки поиска" }).click();
+    await member.getByLabel("Названия ролей и синонимы").fill("platform specialist");
+    await member.getByRole("button", { name: "Сохранить", exact: true }).click();
+    await expect(member.getByText(/^Сохранено ·/)).toBeVisible();
+    await member.getByRole("button", { name: "Включить Remotive", exact: true }).click();
+    await expect(member.getByRole("button", { name: "Выключить Remotive", exact: true })).toBeVisible();
+    await member.getByRole("button", { name: /Вакансии/ }).first().click();
+    await launchSearch(member);
+    await member.getByRole("button", { name: /Показать свежую выдачу/ }).click();
+    const open = member.getByRole("article", { name: "Platform Specialist · Open" });
+    await open.getByText("Фрагмент описания", { exact: false }).click();
+    await open.getByRole("button", { name: "Найти полное описание" }).click();
+    await expect(open.getByText("Отрасль", { exact: true })).toBeVisible();
+    await expect(open.getByText(/Требуются · английский и русский/)).toBeVisible();
+    await expect(open.getByText(/Открыта ·/)).toBeVisible();
+    const unknown = member.getByRole("article", { name: "Platform Specialist · Unknown" });
+    await unknown.getByRole("button", { name: "Найти полное описание" }).click();
+    await expect(unknown.getByText(/Не удалось подтвердить ·/)).toBeVisible();
+    await expect(unknown.getByText("Фрагмент описания", { exact: false })).toBeVisible();
+    const closed = member.getByRole("article", { name: "Platform Specialist · Closed" });
+    await closed.getByRole("button", { name: "Найти полное описание" }).click();
+    await expect(closed).toHaveCount(0);
+    await expect(member.getByRole("article")).toHaveCount(2);
+  } finally {
+    await context.close();
+  }
+});
+
+test("multipart accepts a 10 MiB CV, rejects one more byte and keeps the active template", async ({ page, browser }) => {
+  await signIn(page);
+  const invitation = await invite(page, "feedback-upload-limit");
+  const context = await browser.newContext();
+  try {
+    const member = await context.newPage();
+    await accept(member, invitation.token);
+    const previous = await activatePersonalCV(member, "Prior Candidate", "I wrote automated tests and maintained a QA workflow.");
+    const padded = pythonBytes(`
+import io, sys, zipfile
+from docx import Document
+document = Document()
+document.add_paragraph("Size Boundary Candidate")
+document.add_paragraph("I write reliable integration tests for distributed applications.")
+initial = io.BytesIO()
+document.save(initial)
+with zipfile.ZipFile(initial, "a", zipfile.ZIP_STORED) as archive:
+    archive.writestr("padding-one.bin", bytes(5_000_000))
+def append_padding(size):
+    target = io.BytesIO(initial.getvalue())
+    with zipfile.ZipFile(target, "a", zipfile.ZIP_STORED) as archive:
+        archive.writestr("padding-two.bin", bytes(size))
+    return target.getvalue()
+wanted = 10 * 1024 * 1024
+sys.stdout.buffer.write(append_padding(wanted - len(append_padding(0))))
+`);
+    expect(padded.length).toBe(10 * 1024 * 1024);
+    const selection = member.getByLabel("Файл эталонного CV");
+    const mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    await selection.setInputFiles({ name: "boundary.docx", mimeType, buffer: Buffer.concat([padded, Buffer.from([0])]) });
+    await expect(member.getByRole("alert")).toContainText("10 МБ");
+    const proxy = await member.request.post(`${origin}/api/template-drafts`, {
+      headers: await headers(member),
+      multipart: { file: { name: "boundary.docx", mimeType, buffer: Buffer.concat([padded, Buffer.from([0])]) } },
+    });
+    expect(proxy.status()).toBe(413);
+    expect((await (await member.request.get(`${origin}/api/profile`)).json()).active.id).toBe(previous.id);
+    await selection.setInputFiles({ name: "boundary.docx", mimeType, buffer: padded });
+    await expect(member.getByRole("heading", { name: "Факты из вашего CV" })).toBeVisible();
+    expect((await (await member.request.get(`${origin}/api/profile`)).json()).active.id).toBe(previous.id);
+  } finally {
+    await context.close();
   }
 });

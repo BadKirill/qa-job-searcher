@@ -7,3 +7,10 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
+
+if (!HTMLDialogElement.prototype.showModal) {
+  Object.defineProperties(HTMLDialogElement.prototype, {
+    showModal: { configurable: true, value(this: HTMLDialogElement) { this.open = true; } },
+    close: { configurable: true, value(this: HTMLDialogElement) { this.open = false; } },
+  });
+}

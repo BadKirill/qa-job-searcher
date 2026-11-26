@@ -23,7 +23,7 @@ test("synthetic professions survive real matching, API, browser reload and state
       .toBe(false);
   }
   const designer = page.getByRole("article", { name: "Senior Product Designer", exact: true });
-  await designer.getByText("Полное описание", { exact: false }).click();
+  await designer.getByText("Фрагмент описания", { exact: false }).click();
   await expect(designer.getByText("Design accessible products in Figma.")).toBeVisible();
   await designer.getByRole("button", { name: "Не подходит", exact: true }).click();
   await page.reload();

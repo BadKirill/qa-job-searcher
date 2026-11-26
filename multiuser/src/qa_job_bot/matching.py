@@ -4,7 +4,7 @@ import re
 from dataclasses import replace
 
 from qa_job_bot.config import EUROPE_CIS_LOCATION_TERMS, SearchProfile
-from qa_job_bot.job_language import working_languages
+from qa_job_bot.job_language import matches_working_languages
 from qa_job_bot.models import Job, MatchResult
 
 REMOTE_WORDS = (
@@ -376,7 +376,7 @@ def _location_status(job: Job, profile: SearchProfile) -> str:
     return "unknown"
 
 
-def match_job(job: Job, profile: SearchProfile) -> MatchResult:
+def match_job(job: Job, profile: SearchProfile, *, day=None) -> MatchResult:
     title = job.title.casefold()
     searchable = " ".join((job.title, job.description, " ".join(job.tags))).casefold()
     reasons: list[str] = []
@@ -402,22 +402,43 @@ def match_job(job: Job, profile: SearchProfile) -> MatchResult:
     score += 35
     reasons.append(f"роль: {role_matches[0]}")
 
-    location_status = _location_status(job, profile)
+    decision = None
+    if profile.matching_mode == "universal":
+        from qa_job_bot.universal_matching import location_decision
+
+        decision = location_decision(job, profile, day)
+    location_status = decision.status if decision else _location_status(job, profile)
+    location_code = decision.code if decision else None
+    location_reason = decision.reason if decision else None
     if location_status in {"blocked", "not_remote"}:
-        return MatchResult(False, score, reasons + ["география не подходит"], location_status)
+        return MatchResult(
+            False,
+            score,
+            reasons + [location_reason or "география не подходит"],
+            location_status,
+            location_code,
+        )
     if location_status == "allowed":
         score += 25
-        reasons.append("подходит по географии")
+        reasons.append(location_reason or "подходит по географии")
     elif profile.allow_unknown_remote_location:
         score += 8
-        reasons.append("remote, географию стоит проверить")
+        reasons.append(location_reason or "remote, географию стоит проверить")
     else:
-        return MatchResult(False, score, reasons + ["география неясна"], location_status)
+        return MatchResult(
+            False,
+            score,
+            reasons + [location_reason or "география неясна"],
+            location_status,
+            location_code,
+        )
 
-    if profile.working_languages and working_languages(job.description, job.company).isdisjoint(
-        profile.working_languages
+    if profile.working_languages and not matches_working_languages(
+        job.description, job.company, profile.working_languages
     ):
-        return MatchResult(False, score, reasons + ["язык вакансии не подходит"], location_status)
+        return MatchResult(
+            False, score, reasons + ["язык вакансии не подходит"], location_status, location_code
+        )
 
     seniority = _contains(title, profile.preferred_seniority)
     if seniority:
@@ -449,7 +470,7 @@ def match_job(job: Job, profile: SearchProfile) -> MatchResult:
         reasons.append("указана зарплата")
 
     score = min(score, 100)
-    return MatchResult(score >= profile.min_score, score, reasons, location_status)
+    return MatchResult(score >= profile.min_score, score, reasons, location_status, location_code)
 
 
 def rank_jobs(jobs: list[Job], profile: SearchProfile) -> list[Job]:

@@ -13,7 +13,7 @@ from sqlalchemy.engine import make_url
 from qa_job_bot.pg_schema import users
 from qa_job_bot.web_store import StoreError
 
-REVISION = "0007_shared_runtime"
+REVISION = "0008_posting_tasks"
 
 
 class Database:

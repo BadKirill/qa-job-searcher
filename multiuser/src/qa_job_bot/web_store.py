@@ -17,10 +17,12 @@ ACTIVE_STATUSES = ("queued", "running", "verifying", "rendering")
 
 
 class StoreError(ValueError):
-    def __init__(self, message: str, status: int = 400):
+    def __init__(self, message: str, status: int = 400, *, code=None, fields=None):
         super().__init__(message)
         self.status = status
         self.detail = message
+        self.code = code
+        self.fields = fields
 
 
 def encode(value: Any) -> str:

@@ -24,7 +24,7 @@ test("imported owner signs in with the old password and keeps history, checked f
   expect(blocked.artifacts).toHaveLength(1);
   expect((await page.request.get(`/api/artifacts/${blocked.artifacts[0].id}/download`)).status()).toBe(409);
   expect((await page.request.get(`/api/tasks/${blocked.id}/document-preview`)).status()).toBe(404);
-  await page.getByRole("button", { name: "Applied", exact: true }).click();
+  await page.getByRole("button", { name: "Отклики", exact: true }).click();
   await expect(page.getByRole("article")).toHaveCount(2);
   const incomplete = page.getByRole("article", { name: "Legacy Incomplete QA", exact: true });
   await expect(incomplete.getByRole("alert")).toContainText("Историческая вакансия без описания");

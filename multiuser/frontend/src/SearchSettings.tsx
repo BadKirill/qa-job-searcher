@@ -1,14 +1,23 @@
 import {
   useEffect,
   useId,
+  useRef,
   useState,
   type InputHTMLAttributes,
   type SelectHTMLAttributes,
 } from "react";
-import { errorMessage, request } from "./api";
-import { Loading, Notice } from "./components";
+import { ApiError, errorMessage, request } from "./api";
+import { formatCreatedAt, Loading, Notice } from "./components";
+import { PlacePicker } from "./PlacePicker";
+import { SearchSources, type SourceType } from "./SearchSources";
 
 export type SearchSpec = {
+  remote_place_ids?: string[] | null;
+  hybrid_place_ids?: string[] | null;
+  office_place_ids?: string[] | null;
+  preferred_place_ids?: string[];
+  excluded_place_ids?: string[];
+  availability?: { zone: string; start: string; end: string } | null;
   role_keywords: string[];
   source_queries: string[];
   excluded_title_keywords: string[];
@@ -37,27 +46,34 @@ export type Source = {
   name: string;
   valid: boolean;
   limitations: string;
+  builtin?: boolean;
 };
 export type Preferences = {
   search_profile: {
     version: number;
+    editor_version?: number;
+    generation?: number;
+    name?: string;
+    variant_id?: string;
+    saved_version?: number;
+    saved_variant_id?: string;
+    saved_name?: string;
     configured: boolean;
     profile: SearchSpec | null;
   };
   sources: { version: number; items: Source[] };
 };
-type SourceType = { kind: string; name: string; limitations: string };
 const fields = [
   ["role_keywords", "Названия ролей и синонимы", "обязательно, через запятую, например product designer, ux designer"],
-  ["source_queries", "Запросы к агрегаторам (до 8)", "если пусто, используются первые 8 названий ролей"],
+  ["source_queries", "Запросы для сайтов вакансий", "до восьми отдельных фраз, например qa engineer, manual tester. Если поле пустое, используем первые восемь названий ролей"],
   ["excluded_title_keywords", "Исключения в названиях", "вакансии с этими словами в названии пропускаются, например lead, intern"],
   ["preferred_seniority", "Предпочтительные уровни", "совпадения повышают оценку, например middle, senior"],
   ["focus_qa_keywords", "Приоритетные направления", "совпадения повышают оценку, например design systems, ux research"],
   ["domain_keywords", "Отрасли", "совпадения повышают оценку, например fintech, education"],
   ["skill_keywords", "Навыки", "совпадения повышают оценку, например figma, prototyping"],
-  ["allowed_locations", "Подходящие страны и регионы", "если пусто, география не ограничена этим списком"],
-  ["blocked_locations", "Исключённые страны и регионы", "оставьте пустым, если исключений нет"],
-  ["candidate_locations", "Где вы можете работать", "ваши страны и города для проверки ограничений работодателя"],
+  ["allowed_locations", "Предпочтения по локации вакансии", "если пусто, география не ограничена этим списком"],
+  ["blocked_locations", "Исключения по локации вакансии", "оставьте пустым, если исключений нет"],
+  ["candidate_locations", "Откуда могу работать", "ваши страны и города для проверки ограничений работодателя"],
   ["hybrid_locations", "Города для гибридной работы", "укажите города, где готовы приезжать в офис, например berlin"],
 ] as const;
 const workplace = [
@@ -99,26 +115,10 @@ export const emptySearch: SearchSpec = {
   matching_mode: "universal",
 };
 const labels: Record<string, string> = {
-  qa: "QA · удалённо и гибрид в Сербии",
+  qa: "QA",
   developer: "Разработка",
   designer: "Дизайн",
 };
-const boardKinds = ["greenhouse", "lever", "ashby"];
-const hasSourceOptions = (kind: string) =>
-  boardKinds.includes(kind) || kind === "telegram";
-const reasons: Record<string, string> = {
-  redirect: "Источник перенаправляет запрос. Автоматический переход запрещён.",
-  rate_limited: "Источник временно ограничил запросы.",
-  http_error: "Источник вернул ошибку HTTP.",
-  unavailable: "Источник не ответил вовремя.",
-  invalid_response: "Ответ не соответствует формату источника.",
-  blocked_address: "Адрес не разрешён.",
-  blocked_resolution: "Адрес сети не разрешён.",
-  response_limit: "Ответ превышает ограничение размера.",
-  request_limit: "Превышен предел запросов.",
-  unsupported_encoding: "Неподдерживаемое сжатие ответа.",
-};
-
 function FieldHint({ id, children }: { id: string; children: string }) {
   return <small className="field-hint" id={id}>({children})</small>;
 }
@@ -126,14 +126,16 @@ function FieldHint({ id, children }: { id: string; children: string }) {
 function CriteriaInput({
   label,
   hint,
+  issue,
   ...input
-}: InputHTMLAttributes<HTMLInputElement> & { label: string; hint: string }) {
+}: InputHTMLAttributes<HTMLInputElement> & { label: string; hint: string; issue?: string }) {
   const id = useId();
   const control = (
     <input
       {...input}
       aria-labelledby={id}
-      aria-describedby={`${id}-hint`}
+      aria-describedby={`${id}-hint${issue ? ` ${id}-issue` : ""}`}
+      aria-invalid={issue ? true : undefined}
       autoComplete="off"
       data-1p-ignore
     />
@@ -146,6 +148,7 @@ function CriteriaInput({
         <FieldHint id={`${id}-hint`}>{hint}</FieldHint>
       </span>
       {input.type !== "checkbox" && control}
+      {issue && <small id={`${id}-issue`} role="alert">{issue}</small>}
     </label>
   );
 }
@@ -169,27 +172,31 @@ function SettingsSelect({
   );
 }
 
-function matchingPreset(
-  profile: SearchSpec | null,
-  presets: Record<string, SearchSpec>,
-) {
-  if (!profile) return "";
-  return (
-    Object.keys(presets).find((name) =>
-      (Object.keys(presets[name]) as (keyof SearchSpec)[]).every(
-        (key) => JSON.stringify(presets[name][key]) === JSON.stringify(profile[key]),
-      ),
-    ) ?? ""
-  );
-}
-
 type ProfileVersion = {
   version: number;
+  variant_id?: string;
+  name?: string;
   active: boolean;
-  profile: Partial<Omit<SearchSpec, "matching_mode">> & { require_remote?: boolean };
+  deleted?: boolean;
+  created_at?: string;
+  profile: Partial<SearchSpec> & { require_remote?: boolean };
+  editable_profile?: SearchSpec;
 };
 
-function ProfileHistory() {
+type VariantAction = "activate" | "rename" | "delete";
+
+const geographicFields = [
+  ["remote_place_ids", "Откуда могу работать удалённо", "country,city,region,state"],
+  ["hybrid_place_ids", "Где готов ездить в офис при гибриде", "country,city"],
+  ["office_place_ids", "Где готов работать в офисе", "country,city"],
+  ["preferred_place_ids", "Предпочтения по локации вакансии", "country,city,region,state"],
+  ["excluded_place_ids", "Исключения по локации вакансии", "country,city,region,state"],
+] as const;
+
+function ProfileHistory({ onLoad, onAction }: {
+  onLoad: (item: ProfileVersion) => void;
+  onAction: (item: ProfileVersion, action: VariantAction) => void;
+}) {
   const [items, setItems] = useState<ProfileVersion[] | null>(null);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
@@ -230,12 +237,25 @@ function ProfileHistory() {
   if (!items.length) return <p>Сохранённых версий пока нет.</p>;
   return (
     <ol className="profile-versions" role="list">
-      {[...items].reverse().map(({ version, active, profile }) => (
-        <li key={version} data-active={active}>
+      {[...items].reverse().filter((item) => !item.deleted).map((item) => {
+        const { version, active, profile, name, created_at } = item;
+        return (
+        <li key={version} data-active={active} data-version={version}>
           <details>
             <summary>
-              Версия {version}{active ? " · используется в поиске" : ""}
+              {name ?? `Версия ${version}`}{active ? " · используется в поиске" : ""}
+              {created_at && <small> · ревизия {version} · {formatCreatedAt(created_at)}</small>}
             </summary>
+            <div className="source-actions">
+              <button type="button" className="button secondary" onClick={() => onLoad(item)}>Загрузить в форму</button>
+              <button type="button" className="button secondary" disabled={active}
+                onClick={() => onAction(item, "activate")}>Использовать в поиске</button>
+              <button type="button" className="button secondary"
+                onClick={() => onAction(item, "rename")}>Переименовать</button>
+              <button type="button" className="button secondary"
+                disabled={items.some((entry) => entry.active && (entry.variant_id ?? String(entry.version)) === (item.variant_id ?? String(item.version)))}
+                onClick={() => onAction(item, "delete")}>Удалить вариант</button>
+            </div>
             <dl>
               {fields.map(([field, label]) => (
                 <div key={field}>
@@ -269,13 +289,14 @@ function ProfileHistory() {
                 </div>
               ))}
               <div>
-                <dt>Минимальная оценка</dt>
+                <dt>Порог совпадения с критериями</dt>
                 <dd>{profile.min_score ?? "—"} из 100</dd>
               </div>
             </dl>
           </details>
         </li>
-      ))}
+        );
+      })}
     </ol>
   );
 }
@@ -303,29 +324,48 @@ export function SearchSettings({
   const [revision, setRevision] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [selectedKind, setKind] = useState("remotive");
-  const [token, setToken] = useState("");
-  const [name, setName] = useState("");
-  const [region, setRegion] = useState("global");
-  const [tags, setTags] = useState("");
-  const [editing, setEditing] = useState<Source | null>(null);
   const [presetChoice, setPresetChoice] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const historyId = useId();
-  const savedProfile = state?.search_profile.profile ?? null;
-  const savedPreset = matchingPreset(savedProfile, presets);
-  const preset = presetChoice ?? savedPreset;
+  const [edited, setEdited] = useState<{ id: string; name: string } | null>(null);
+  const [baseline, setBaseline] = useState("");
+  const [saveName, setSaveName] = useState("");
+  const [showNew, setShowNew] = useState(false);
+  const [rename, setRename] = useState<ProfileVersion | null>(null);
+  const [replaceDraft, setReplaceDraft] = useState<(() => void) | null>(null);
+  const [removing, setRemoving] = useState<ProfileVersion | null>(null);
+  const [criteriaNotice, setCriteriaNotice] = useState("");
+  const [legacyChoices, setLegacyChoices] = useState<Record<string, { id: string; label: string }[]> | null>(null);
+  const [accountConflict, setAccountConflict] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const criteriaForm = useRef<HTMLFormElement>(null);
+  const dialog = useRef<HTMLDialogElement>(null);
+  const preset = presetChoice ?? "";
+  const draft = JSON.stringify([form, terms]);
+  const dirty = !!baseline && baseline !== draft;
+  function loadDraft(profile: SearchSpec, markSaved: boolean) {
+    const updatedTerms = Object.fromEntries(fields.map(([field]) => [field, profile[field]?.join(", ") ?? ""]));
+    setForm(profile);
+    setTerms(updatedTerms);
+    if (markSaved) setBaseline(JSON.stringify([profile, updatedTerms]));
+  }
   function receive(data: Preferences) {
     setState(data);
+    const active = data.search_profile;
+    setEdited(active.variant_id ? { id: active.variant_id, name: active.name ?? "" } : null);
     setPresetChoice(null);
-    const profile = data.search_profile.profile ?? emptySearch;
-    setForm(profile);
-    setTerms(
-      Object.fromEntries(
-        fields.map(([field]) => [field, profile[field].join(", ")]),
-      ),
-    );
+    loadDraft(active.profile ?? emptySearch, true);
+  }
+  useEffect(() => {
+    if (showNew || rename || replaceDraft || removing) dialog.current?.showModal();
+    else dialog.current?.close();
+  }, [showNew, rename, replaceDraft, removing]);
+  function closeDialog() {
+    setShowNew(false); setRename(null); setReplaceDraft(null); setRemoving(null); setSaveName("");
+  }
+  function replaceIfConfirmed(operation: () => void) {
+    if (dirty) setReplaceDraft(() => operation);
+    else operation();
   }
   useEffect(() => {
     const controller = new AbortController();
@@ -354,48 +394,119 @@ export function SearchSettings({
     if (busy) return;
     setBusy(true);
     setError("");
-    setNotice("");
+    setAccountConflict(false);
+    setFieldErrors({});
     try {
       await operation();
     } catch (failure) {
       setError(errorMessage(failure));
+      setAccountConflict(failure instanceof ApiError && failure.status === 409);
+      if (failure instanceof ApiError && Object.keys(failure.fields).length) {
+        setFieldErrors(failure.fields);
+        const input = criteriaForm.current && Array.from(criteriaForm.current.elements)
+          .find((element): element is HTMLInputElement => element instanceof HTMLInputElement && !!failure.fields[element.name]);
+        if (input) {
+          const options = input.closest("details");
+          if (options) options.open = true;
+          requestAnimationFrame(() => input.focus());
+        }
+      }
     } finally {
       setBusy(false);
     }
   }
-  async function reloadSources() {
-    const sources = await request<Preferences["sources"]>("/sources");
-    setState((previous) => previous && { ...previous, sources });
-    onChange?.();
+  async function saveProfile(create = false) {
+    if (!state) return;
+    await act(async () => {
+      setCriteriaNotice("");
+      const profile = {
+        ...form,
+        ...Object.fromEntries(fields.map(([field]) => [
+          field, (terms[field] ?? "").split(",").map((value) => value.trim()).filter(Boolean),
+        ])),
+      };
+      const saved = await request<Preferences["search_profile"]>("/search-profile", {
+        method: "PUT",
+        body: {
+          expected_version: state.search_profile.version,
+          expected_editor_version: state.search_profile.editor_version ?? 0,
+          variant_id: create ? null : edited?.id,
+          name: create ? saveName.trim() : undefined,
+          create,
+          profile,
+        },
+      });
+      setState({ ...state, search_profile: saved });
+      if (saved.saved_variant_id) {
+        setEdited({ id: saved.saved_variant_id, name: saved.saved_name ?? "" });
+      }
+      setBaseline(draft);
+      setCriteriaNotice(`Сохранено · ${saved.saved_name ?? edited?.name ?? saved.name ?? "Профиль поиска"}`);
+      closeDialog();
+      onChange?.();
+    });
   }
-  function resetSource() {
-    setEditing(null);
-    setToken("");
-    setName("");
-    setRegion("global");
-    setTags("");
+  function editRevision(item: ProfileVersion) {
+    replaceIfConfirmed(() => {
+      const { require_remote: formerMode, ...rawProfile } = item.profile;
+      const profile = item.editable_profile ?? rawProfile;
+      loadDraft({
+        ...emptySearch,
+        ...profile,
+        workplace_types: profile.workplace_types ?? (formerMode ? ["remote", "hybrid"] : ["remote", "hybrid", "on-site"]),
+      }, true);
+      setEdited({ id: item.variant_id ?? String(item.version), name: item.name ?? `Версия ${item.version}` });
+      setPresetChoice(null);
+    });
   }
-  const sources = state?.sources.items ?? [];
-  const connectedAggregators = new Set(
-    sources
-      .filter((source) => source.valid && !hasSourceOptions(source.kind))
-      .map((source) => source.kind),
-  );
-  const kind = editing?.kind ?? (connectedAggregators.has(selectedKind) ? "" : selectedKind);
-  const isBoard = boardKinds.includes(kind);
-  const isChannel = kind === "telegram";
-  const normalizedToken = token.normalize("NFKC").trim().toLowerCase();
-  const duplicate = sources.find((source) => {
-    if (!source.valid || source.kind !== kind || source.id === editing?.id) return false;
-    if (isChannel) {
-      return String(source.config.handle).toLowerCase() === normalizedToken.replace(/^@/, "");
-    }
-    return (
-      isBoard &&
-      String(source.config.token).toLowerCase() === normalizedToken &&
-      (source.config.region ?? "global") === region
+  async function versionAction(item: ProfileVersion, action: VariantAction) {
+    if (!state) return;
+    await act(async () => {
+      const saved = await request<Preferences["search_profile"]>(`/search-profile/history/${item.version}`, {
+        method: "POST",
+        body: {
+          expected_editor_version: state.search_profile.editor_version ?? 0,
+          action,
+          name: action === "rename" ? saveName.trim() : undefined,
+        },
+      });
+      const itemId = item.variant_id ?? String(item.version);
+      if (edited?.id === itemId && action === "rename") setEdited({ id: itemId, name: saveName.trim() });
+      if (edited?.id === itemId && action === "delete") setEdited(null);
+      setState({ ...state, search_profile: saved });
+      setCriteriaNotice(action === "activate" ? `Используется в поиске · ${item.name ?? `Версия ${item.version}`}` : "Список вариантов обновлён.");
+      closeDialog();
+      onChange?.();
+    });
+  }
+  async function suggestLegacyPlaces() {
+    const values = fields.slice(-4).flatMap(([field]) =>
+      (terms[field] ?? "").split(",").map((value) => value.trim()).filter(Boolean),
     );
-  });
+    await act(async () => {
+      const query = new URLSearchParams([...new Set(values)].map((value) => ["value", value]));
+      setLegacyChoices(await request(`/places/legacy?${query}`));
+    });
+  }
+  function adoptLegacyPlaces() {
+    if (!legacyChoices) return;
+    const idsFor = (field: string, filter: (id: string) => boolean) =>
+      (terms[field] ?? "").split(",").map((value) => legacyChoices[value.trim()])
+        .filter((matches) => matches?.length === 1 && filter(matches[0].id))
+        .map((matches) => matches[0].id);
+    const office = (id: string) => id.startsWith("city:") || id.startsWith("country:");
+    setForm({
+      ...form,
+      remote_place_ids: form.remote_place_ids ?? (form.workplace_types.includes("remote")
+        ? idsFor("candidate_locations", (id) => id !== "region:world") : []),
+      hybrid_place_ids: form.hybrid_place_ids ?? (form.workplace_types.includes("hybrid")
+        ? idsFor("hybrid_locations", office) : []),
+      office_place_ids: form.office_place_ids ?? [],
+      preferred_place_ids: form.preferred_place_ids?.length ? form.preferred_place_ids : idsFor("allowed_locations", () => true),
+      excluded_place_ids: form.excluded_place_ids?.length ? form.excluded_place_ids : idsFor("blocked_locations", () => true),
+    });
+    setCriteriaNotice("Проверьте подставленные локации перед сохранением. Место офиса выберите отдельно.");
+  }
   return (
     <section className="search-settings">
       <header className="page-heading">
@@ -403,10 +514,10 @@ export function SearchSettings({
           <p className="eyebrow">ЛИЧНЫЙ ПОИСК</p>
           <h1>
             {page === "criteria"
-              ? "Что ищу"
+              ? "Критерии"
               : page === "sources"
                 ? "Источники"
-                : "Поиск и источники"}
+                : "Настройки поиска"}
           </h1>
           <p className="muted">Ваши критерии и подключения. Значения в списках разделяйте запятыми.</p>
         </div>
@@ -417,7 +528,7 @@ export function SearchSettings({
           aria-pressed={page === "criteria"}
           onClick={() => choosePage("criteria")}
         >
-          Что ищу
+          Критерии
         </button>
         <button
           className="button secondary"
@@ -439,13 +550,44 @@ export function SearchSettings({
           {error}
           <button
             className="text-button"
-            onClick={() => setRevision((value) => value + 1)}
+            onClick={() => {
+              if (!accountConflict || !state) {
+                replaceIfConfirmed(() => setRevision((value) => value + 1));
+              } else {
+                void act(async () => {
+                  const latest = await request<Preferences>("/search-settings");
+                  setState(latest);
+                  setCriteriaNotice("Актуальный вариант загружен в историю. Черновик сохранён в форме.");
+                });
+              }
+            }}
           >
             Загрузить актуальные настройки
           </button>
         </Notice>
       )}
-      {notice && <Notice tone="info">{notice}</Notice>}
+      <dialog ref={dialog} aria-labelledby={`${historyId}-confirmation`}
+        onCancel={(event) => { event.preventDefault(); closeDialog(); }}>
+        <form onSubmit={(event) => {
+          event.preventDefault();
+          if (replaceDraft) { replaceDraft(); closeDialog(); }
+          else if (rename) void versionAction(rename, "rename");
+          else if (removing) void versionAction(removing, "delete");
+          else void saveProfile(true);
+        }}>
+          <h2 id={`${historyId}-confirmation`}>{replaceDraft ? "Заменить несохранённые поля?" : removing
+            ? "Удалить вариант из списка?" : rename ? "Переименовать вариант" : "Новая версия профиля"}</h2>
+          {(showNew || rename) && (
+            <label>Имя варианта<input required maxLength={120} value={saveName}
+              onChange={(event) => setSaveName(event.target.value)} /></label>
+          )}
+          {error && (showNew || rename || replaceDraft || removing) && <Notice>{error}</Notice>}
+          <div className="source-actions">
+            <button className="button secondary" type="button" onClick={closeDialog}>{replaceDraft ? "Оставить черновик" : "Отмена"}</button>
+            <button className="button primary" type="submit" disabled={busy}>{replaceDraft ? "Заменить" : removing ? "Удалить" : "Сохранить"}</button>
+          </div>
+        </form>
+      </dialog>
       {!state ? (
         <Loading text="Загружаем настройки поиска…" />
       ) : (
@@ -453,7 +595,7 @@ export function SearchSettings({
           {!state.search_profile.configured && (
             <Notice tone="info">
               Профиль поиска ещё не настроен. Добавьте свои критерии и источники
-              или явно примените пример.
+              или подставьте пример и сохраните критерии.
             </Notice>
           )}
           {page !== "sources" && (
@@ -468,112 +610,118 @@ export function SearchSettings({
                     <strong id={historyId}>История версий профиля</strong>
                     <span id={`${historyId}-status`}>
                       {state.search_profile.configured
-                        ? `В поиске используется версия ${state.search_profile.version}`
+                        ? `В поиске используется ${state.search_profile.name ?? `версия ${state.search_profile.version}`}`
                         : "Здесь появятся ваши сохранённые критерии"}
                     </span>
                   </span>
                 </summary>
                 <div className="profile-history-content">
-                  <p className="muted">Каждое сохранение или применение примера создаёт новую версию. Откройте версию, чтобы посмотреть её критерии.</p>
-                  {historyOpen && <ProfileHistory key={state.search_profile.version} />}
+                  {historyOpen && (
+                    <ProfileHistory key={state.search_profile.editor_version ?? state.search_profile.version}
+                      onLoad={editRevision} onAction={(item, action) => {
+                        if (action === "activate") void versionAction(item, action);
+                        if (action === "rename") {
+                          setSaveName(item.name ?? `Версия ${item.version}`);
+                          setRename(item);
+                        }
+                        if (action === "delete") setRemoving(item);
+                      }}
+                    />
+                  )}
                 </div>
               </details>
               <fieldset className="settings-presets" disabled={busy}>
                 <legend>Примеры для начала</legend>
-                <p>
-                  Применение заменит профиль и подключит недостающие агрегаторы
-                  из набора пяти. Ваши доски, каналы и состояние подключений
-                  сохранятся.
-                </p>
-                <SettingsSelect
-                  label="Пример профиля"
-                  hint="выберите пример, затем нажмите «Применить пример»"
-                  value={preset}
-                  onChange={(event) => setPresetChoice(event.target.value)}
-                >
+                <p>Пример заполняет критерии профессии. Проверьте места, где можете работать, перед сохранением.</p>
+                <SettingsSelect label="Пример профиля" hint="например, Дизайн подставит названия ролей и Figma"
+                  value={preset} onChange={(event) => setPresetChoice(event.target.value)}>
                   <option value="">Выберите пример</option>
-                  {Object.keys(presets).map((id) => (
-                    <option key={id} value={id}>{labels[id] ?? id}</option>
-                  ))}
+                  {Object.keys(presets).map((id) => <option key={id} value={id}>{labels[id] ?? id}</option>)}
                 </SettingsSelect>
-                <button
-                  type="button"
-                  className="button secondary"
-                  disabled={!preset}
-                  onClick={() =>
-                    void act(async () => {
-                      receive(
-                        await request<Preferences>(
-                          `/search-presets/${preset}/apply`,
-                          {
-                            method: "POST",
-                            body: {
-                              expected_version: state.search_profile.version,
-                              expected_sources_version: state.sources.version,
-                            },
-                          },
-                        ),
-                      );
-                      setNotice(
-                        "Пример применён. Критерии сохранены в вашем аккаунте.",
-                      );
-                      onChange?.();
-                    })
-                  }
-                >
-                  Применить пример
+                <button type="button" className="button secondary" disabled={!preset}
+                  onClick={() => replaceIfConfirmed(() => {
+                    const example = presets[preset];
+                    const places = Object.fromEntries(geographicFields.map(([field]) => [field, form[field]]));
+                    loadDraft({
+                      ...example, ...places, availability: form.availability,
+                      candidate_locations: form.candidate_locations, hybrid_locations: form.hybrid_locations,
+                      allowed_locations: form.allowed_locations, blocked_locations: form.blocked_locations,
+                      workplace_types: form.workplace_types,
+                    }, false);
+                    setTerms((current) => ({
+                      ...current,
+                      ...Object.fromEntries(["candidate_locations", "hybrid_locations", "allowed_locations", "blocked_locations"]
+                        .map((field) => [field, terms[field] ?? ""])),
+                    }));
+                    setCriteriaNotice(`Подставлен пример · ${labels[preset] ?? preset}`);
+                  })}>
+                  Подставить пример
                 </button>
               </fieldset>
-              <form
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void act(async () => {
-                    const profile = {
-                      ...form,
-                      ...Object.fromEntries(
-                        fields.map(([field]) => [
-                          field,
-                          (terms[field] ?? "")
-                            .split(",")
-                            .map((value) => value.trim())
-                            .filter(Boolean),
-                        ]),
-                      ),
-                    };
-                    const saved = await request<Preferences["search_profile"]>(
-                      "/search-profile",
-                      {
-                        method: "PUT",
-                        body: {
-                          expected_version: state.search_profile.version,
-                          profile,
-                        },
-                      },
-                    );
-                    receive({ ...state, search_profile: saved });
-                    setNotice("Профиль поиска сохранён.");
-                    onChange?.();
-                  });
-                }}
-              >
+              <form ref={criteriaForm} onSubmit={(event) => { event.preventDefault(); void saveProfile(); }}>
                 <fieldset className="criteria-fields" disabled={busy}>
-                  <legend>Профиль поиска</legend>
-                  <p className="muted">
-                    Критерии сохраняются в вашем аккаунте. Для поиска используется последняя сохранённая версия.
-                    Пустые необязательные поля оставляют соответствующий критерий без дополнительных настроек.
-                  </p>
-                  {fields.map(([field, label, hint]) => (
-                    <CriteriaInput
-                      key={field}
-                      label={label}
-                      hint={hint}
-                      required={field === "role_keywords"}
-                      value={terms[field] ?? ""}
-                      onChange={(event) =>
-                        setTerms({ ...terms, [field]: event.target.value })
-                      }
-                    />
+                  <legend>Критерии поиска</legend>
+                  <p>В редакторе · {edited?.name ?? "Новый вариант"}</p>
+                  {fields.filter(([field]) =>
+                    !["source_queries", "candidate_locations", "hybrid_locations", "allowed_locations", "blocked_locations"].includes(field)
+                  ).map(([field, label, hint]) => (
+                    <CriteriaInput key={field} label={label} hint={hint} name={field} issue={fieldErrors[field]}
+                      required={field === "role_keywords"} value={terms[field] ?? ""}
+                      onChange={(event) => setTerms({ ...terms, [field]: event.target.value })} />
                   ))}
+                  <details>
+                    <summary>Дополнительные настройки</summary>
+                    <CriteriaInput label={fields[1][1]} hint={fields[1][2]} name="source_queries" issue={fieldErrors.source_queries}
+                      value={terms.source_queries ?? ""}
+                      onChange={(event) => setTerms({ ...terms, source_queries: event.target.value })} />
+                  </details>
+                  <fieldset>
+                    <legend>Где и в каком формате</legend>
+                    {geographicFields.map(([field, label, kinds]) => (
+                      <PlacePicker key={field} label={label} kinds={kinds} values={form[field] ?? []}
+                        onChange={(values) => setForm({ ...form, [field]: values })} />
+                    ))}
+                    {fields.slice(-4).some(([field]) => terms[field]) && (
+                      <details>
+                        <summary>География из прежнего профиля · проверьте перед заменой</summary>
+                        {fields.slice(-4).filter(([field]) => terms[field]).map(([field, label]) => (
+                          <p key={field}>{label} · {terms[field]}</p>
+                        ))}
+                        <button type="button" className="button secondary" onClick={() => void suggestLegacyPlaces()}>Сверить прежние локации</button>
+                        {legacyChoices && (
+                          <>
+                            <ul>{Object.entries(legacyChoices).map(([value, matches]) => (
+                              <li key={value}>{value} · {matches.length === 1 ? matches[0].label : "Требует уточнения"}</li>
+                            ))}</ul>
+                            <button type="button" className="button secondary" onClick={adoptLegacyPlaces}>Подставить распознанные локации</button>
+                          </>
+                        )}
+                        <button type="button" className="button secondary" onClick={() => replaceIfConfirmed(() => {
+                          setTerms({ ...terms, candidate_locations: "", hybrid_locations: "", allowed_locations: "", blocked_locations: "" });
+                        })}>Убрать прежние значения</button>
+                      </details>
+                    )}
+                    <details open={form.availability ? true : undefined}>
+                      <summary>Часы доступности</summary>
+                      <CriteriaInput label="Учитывать часы доступности" type="checkbox"
+                        hint="сравниваем с обязательными часами работодателя" checked={!!form.availability}
+                        onChange={(event) => setForm({ ...form, availability: event.target.checked
+                          ? { zone: Intl.DateTimeFormat().resolvedOptions().timeZone, start: "09:00", end: "18:00" } : null })} />
+                      {form.availability && (
+                        <>
+                          <CriteriaInput label="Часовой пояс" hint="например, Europe/Belgrade"
+                            value={form.availability.zone} required name="availability.zone" issue={fieldErrors["availability.zone"]}
+                            onChange={(event) => form.availability && setForm({ ...form, availability: { ...form.availability, zone: event.target.value } })} />
+                          <CriteriaInput label="Доступен с" hint="местное время" type="time" required
+                            value={form.availability.start}
+                            onChange={(event) => form.availability && setForm({ ...form, availability: { ...form.availability, start: event.target.value } })} />
+                          <CriteriaInput label="Доступен до" hint="местное время" type="time" required
+                            value={form.availability.end}
+                            onChange={(event) => form.availability && setForm({ ...form, availability: { ...form.availability, end: event.target.value } })} />
+                        </>
+                      )}
+                    </details>
+                  </fieldset>
                   <p className="muted">Формат работы <small className="field-hint">(выберите хотя бы один)</small></p>
                   {workplace.map(([mode, label, hint]) => (
                     <CriteriaInput
@@ -593,7 +741,7 @@ export function SearchSettings({
                     />
                   ))}
                   <p className="muted" id={`${historyId}-language`}>
-                    Рабочий язык <small className="field-hint">(без выбора — любой)</small>
+                    Рабочий язык <small className="field-hint">(без выбора — любой. Когда язык команды не указан, учитываем язык публикации)</small>
                   </p>
                   <div className="working-language-choices" role="group" aria-labelledby={`${historyId}-language`}>
                     {workingLanguages.map(([language, label]) => (
@@ -635,8 +783,10 @@ export function SearchSettings({
                       />
                     ))}
                   <CriteriaInput
-                    label="Минимальная оценка"
-                    hint="от 0 до 100, вакансии с более низкой оценкой пропускаются"
+                    label="Порог совпадения с критериями"
+                    hint="например, порог 60 скроет вакансию с 59 баллами"
+                    name="min_score"
+                    issue={fieldErrors.min_score}
                     type="number"
                     min="0"
                     max="100"
@@ -646,250 +796,23 @@ export function SearchSettings({
                       setForm({ ...form, min_score: Number(event.target.value) })
                     }
                   />
-                  <button className="button primary" type="submit">
-                    Сохранить профиль поиска
-                  </button>
+                  <div className="criteria-save-bar">
+                    <div role="status">{criteriaNotice}{dirty && " · Есть несохранённые изменения"}</div>
+                    <button className="button primary" type="submit">Сохранить</button>
+                    <button className="button secondary" type="button" onClick={() => setShowNew(true)}>
+                      Сохранить как новую версию
+                    </button>
+                  </div>
                 </fieldset>
               </form>
             </>
           )}
           {page !== "criteria" && (
-            <>
-              <h2>Мои источники</h2>
-              {state.sources.items.length === 0 && (
-                <p>Источники пока не добавлены.</p>
-              )}
-              <ul className="source-list">
-                {state.sources.items.map((source) => (
-                  <li key={source.id}>
-                    <h3>{source.name}</h3>
-                    <p>{source.limitations}</p>
-                    {!source.valid && (
-                      <Notice>Исправьте параметры подключения.</Notice>
-                    )}
-                    <label className="checkbox-row">
-                      <input
-                        type="checkbox"
-                        aria-label={`Включить ${source.name}`}
-                        checked={source.enabled}
-                        disabled={busy}
-                        onChange={(event) =>
-                          void act(async () => {
-                            await request(`/sources/${source.id}`, {
-                              method: "PATCH",
-                              body: {
-                                expected_version: source.version,
-                                enabled: event.target.checked,
-                              },
-                            });
-                            await reloadSources();
-                          })
-                        }
-                      />
-                      Включён
-                    </label>
-                    <div className="source-actions">
-                      <button
-                        className="button secondary"
-                        aria-label={`Изменить ${source.name}`}
-                        disabled={busy}
-                        onClick={() => {
-                          setEditing(source);
-                          setKind(source.kind);
-                          setToken(
-                            String(
-                              source.config.token ?? source.config.handle ?? "",
-                            ),
-                          );
-                          setName(String(source.config.name ?? ""));
-                          setRegion(String(source.config.region ?? "global"));
-                          setTags(
-                            ((source.config.tags ?? []) as string[]).join(", "),
-                          );
-                        }}
-                      >
-                        Изменить
-                      </button>
-                      <button
-                        className="button secondary"
-                        aria-label={`Проверить ${source.name}`}
-                        disabled={busy || !source.valid}
-                        onClick={() =>
-                          void act(async () => {
-                            const result = await request<{
-                              status: string;
-                              items: number;
-                              reason: string | null;
-                              stale: boolean;
-                            }>(`/sources/${source.id}/check`, {
-                              method: "POST",
-                              body: { expected_version: source.version },
-                            });
-                            setNotice(
-                              result.stale
-                                ? "Настройки изменились во время проверки. Повторите её."
-                                : result.status === "ok"
-                                  ? `Источник доступен. Объявлений в проверенном ответе: ${result.items}. Это не результат поиска.`
-                                  : result.status === "empty"
-                                    ? "Источник доступен, проверенный ответ пуст."
-                                    : (reasons[result.reason ?? ""] ??
-                                      "Не удалось проверить источник."),
-                            );
-                          })
-                        }
-                      >
-                        Проверить
-                      </button>
-                      <button
-                        className="button secondary danger-button"
-                        aria-label={`Удалить ${source.name}`}
-                        disabled={busy}
-                        onClick={() =>
-                          void act(async () => {
-                            await request(`/sources/${source.id}`, {
-                              method: "DELETE",
-                              body: { expected_version: source.version },
-                            });
-                            if (editing?.id === source.id) resetSource();
-                            await reloadSources();
-                          })
-                        }
-                      >
-                        Удалить
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-              <form
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (!kind || duplicate) return;
-                  void act(async () => {
-                    const config = isChannel
-                      ? { handle: token }
-                      : isBoard
-                        ? {
-                            token,
-                            name: name || token,
-                            region,
-                            tags: tags
-                              .split(",")
-                              .map((value) => value.trim())
-                              .filter(Boolean),
-                          }
-                        : {};
-                    await request(
-                      editing ? `/sources/${editing.id}` : "/sources",
-                      {
-                        method: editing ? "PATCH" : "POST",
-                        body: editing
-                          ? { expected_version: editing.version, config }
-                          : { kind, config },
-                      },
-                    );
-                    resetSource();
-                    await reloadSources();
-                    setNotice("Источник сохранён.");
-                  });
-                }}
-              >
-                <fieldset disabled={busy}>
-                  <legend>
-                    {editing ? "Изменить подключение" : "Добавить источник"}
-                  </legend>
-                  <SettingsSelect
-                    label="Тип источника"
-                    hint={
-                      types.find((type) => type.kind === kind)?.limitations ??
-                      "управлять подключёнными агрегаторами можно в списке «Мои источники»"
-                    }
-                    value={kind}
-                    disabled={!!editing}
-                    onChange={(event) => {
-                      setKind(event.target.value);
-                      setRegion("global");
-                    }}
-                  >
-                    <option value="" disabled>
-                      Выберите источник
-                    </option>
-                    {types.map((type) => {
-                      const connected = !editing && connectedAggregators.has(type.kind);
-                      return (
-                        <option key={type.kind} value={type.kind} disabled={connected}>
-                          {type.name}{connected && " · уже подключён"}
-                        </option>
-                      );
-                    })}
-                  </SettingsSelect>
-                  {(isBoard || isChannel) && (
-                    <CriteriaInput
-                      label={
-                        isChannel ? "Handle публичного канала" : "Идентификатор доски"
-                      }
-                      hint={
-                        isChannel
-                          ? "имя из ссылки t.me/jobs_channel, например jobs_channel"
-                          : "часть адреса доски после домена, например company"
-                      }
-                      required
-                      value={token}
-                      onChange={(event) => setToken(event.target.value)}
-                      placeholder={isChannel ? "jobs_channel" : "company"}
-                    />
-                  )}
-                  {isBoard && (
-                    <>
-                      <CriteriaInput
-                        label="Название подключения"
-                        hint="необязательно, например Доска Acme"
-                        value={name}
-                        onChange={(event) => setName(event.target.value)}
-                      />
-                      <CriteriaInput
-                        label="Теги источника"
-                        hint="необязательно, через запятую, например fintech, remote"
-                        value={tags}
-                        onChange={(event) => setTags(event.target.value)}
-                      />
-                    </>
-                  )}
-                  {kind === "lever" && (
-                    <SettingsSelect
-                      label="Регион API"
-                      hint="EU для jobs.eu.lever.co, Global для jobs.lever.co"
-                      value={region}
-                      onChange={(event) => setRegion(event.target.value)}
-                    >
-                      <option value="global">Global</option>
-                      <option value="eu">EU</option>
-                    </SettingsSelect>
-                  )}
-                  {duplicate && (
-                    <Notice tone="info">
-                      Этот источник уже есть в списке «Мои источники» как «{duplicate.name}».
-                    </Notice>
-                  )}
-                  <button
-                    className="button primary"
-                    type="submit"
-                    disabled={!kind || !!duplicate}
-                  >
-                    {editing ? "Сохранить подключение" : "Добавить источник"}
-                  </button>
-                  {editing && (
-                    <button
-                      type="button"
-                      className="button secondary"
-                      onClick={resetSource}
-                    >
-                      Отменить изменение
-                    </button>
-                  )}
-                </fieldset>
-              </form>
-            </>
+            <SearchSources sources={state.sources} types={types}
+              onChange={(sources) => {
+                setState((previous) => previous && { ...previous, sources });
+                onChange?.();
+              }} />
           )}
         </>
       )}

@@ -1,5 +1,6 @@
 import asyncio
 import ipaddress
+import re
 import socket
 from dataclasses import dataclass
 
@@ -17,6 +18,7 @@ HOSTS = frozenset(
         "api.eu.lever.co",
         "api.ashbyhq.com",
         "t.me",
+        "docs.google.com",
     }
 )
 MAX_RESPONSE = 8 * 1024 * 1024
@@ -107,7 +109,10 @@ class PinnedTransport(httpx.AsyncBaseTransport):
         if (
             request.method != "GET"
             or url.scheme != "https"
-            or url.host not in HOSTS
+            or (
+                url.host not in HOSTS
+                and not re.fullmatch(r"doc-[a-z0-9-]+-sheets\.googleusercontent\.com", url.host)
+            )
             or url.port not in {None, 443}
             or url.username
             or url.password

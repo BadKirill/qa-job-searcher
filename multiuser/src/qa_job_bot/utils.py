@@ -24,20 +24,35 @@ class _TextExtractor(HTMLParser):
         "tr",
     }
 
+    ignored = {"script", "style", "template", "noscript"}
+
     def __init__(self) -> None:
         super().__init__()
         self.parts: list[str] = []
+        self.hidden: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag in self.block_tags:
+        if (
+            self.hidden
+            or tag in self.ignored
+            or ("hidden", None) in attrs
+            or ("aria-hidden", "true") in attrs
+        ):
+            if tag not in {"br", "img", "hr", "input", "meta", "link", "wbr", "source"}:
+                self.hidden.append(tag)
+        elif tag in self.block_tags:
             self.parts.append("\n")
 
     def handle_endtag(self, tag: str) -> None:
-        if tag in self.block_tags:
+        if self.hidden:
+            if tag == self.hidden[-1]:
+                self.hidden.pop()
+        elif tag in self.block_tags:
             self.parts.append("\n")
 
     def handle_data(self, data: str) -> None:
-        self.parts.append(data)
+        if not self.hidden:
+            self.parts.append(data)
 
 
 def html_to_text(value: str | None) -> str:

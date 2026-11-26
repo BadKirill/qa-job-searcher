@@ -45,13 +45,13 @@ it("loads ten cards, paginates, persists applied/archive and restores a vacancy"
   await userEvent.click(screen.getByRole("button", { name: "Да" }));
   await waitFor(() => expect(card).not.toBeInTheDocument());
   expect(backend.state.jobs[0].applied_at).toBeTruthy();
-  await userEvent.click(screen.getByRole("button", { name: "Applied" }));
+  await userEvent.click(screen.getByRole("button", { name: "Отклики" }));
   const applied = await screen.findByRole("article", {
     name: "Senior QA Engineer job-1",
   });
   expect(applied).toHaveClass("job-applied");
   await userEvent.click(
-    within(applied).getByRole("button", { name: "Отменить applied" }),
+    within(applied).getByRole("button", { name: "Отменить отметку об отклике" }),
   );
   await screen.findByText("Откликов пока нет");
   await userEvent.click(screen.getByRole("button", { name: /Вакансии/ }));
@@ -144,7 +144,7 @@ it("handles empty search, starts a search and refreshes results while retaining 
   await userEvent.click(screen.getByRole("button", { name: "Обновить поиск" }));
   await screen.findByText(/Поиск запущен/);
   await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Обновляем…" })).toBeDisabled(),
+    expect(screen.getByRole("button", { name: "Поиск в очереди" })).toBeDisabled(),
   );
   await userEvent.click(
     screen.getByRole("button", { name: /Показать свежую выдачу/ }),

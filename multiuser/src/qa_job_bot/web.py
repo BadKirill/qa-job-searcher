@@ -19,13 +19,14 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from qa_job_bot.account_routes import register_account_routes
 from qa_job_bot.accounts import Accounts, account_changes
-from qa_job_bot.document_files import DocumentFileError, parse_template
+from qa_job_bot.document_files import MAX_UPLOAD_BYTES, DocumentFileError, parse_template
 from qa_job_bot.document_policy import content_hash
 from qa_job_bot.maintenance import active as maintenance_active
 from qa_job_bot.operations import ready
 from qa_job_bot.personal_files import allowed_file, checked_path, owner_root, private_directory
 from qa_job_bot.pg_database import Database
 from qa_job_bot.pg_store import PostgresStore
+from qa_job_bot.posting_routes import register_posting_routes
 from qa_job_bot.preferences_routes import register_preferences_routes
 from qa_job_bot.search_models import clean_text
 from qa_job_bot.storage import close_store, open_store
@@ -33,7 +34,7 @@ from qa_job_bot.web_security import Security, WebSettings
 from qa_job_bot.web_store import StoreError, WebStore, digest, encode
 
 COOKIE = "qa_session"
-MAX_BODY = 11 * 1024 * 1024
+MAX_BODY = MAX_UPLOAD_BYTES + 1024 * 1024
 Text = Annotated[str, Field(min_length=1, max_length=120, strict=True)]
 
 
@@ -248,17 +249,54 @@ def create_app(
         )
         return JSONResponse({"ready": available}, status_code=200 if available else 503)
 
+    def api_error(status, detail, fields=None, code=None):
+        codes = {
+            401: "session_expired",
+            403: "forbidden",
+            404: "not_found",
+            409: "conflict",
+            413: "content_too_large",
+            422: "validation",
+            429: "rate_limited",
+            503: "unavailable",
+        }
+        return JSONResponse(
+            {
+                "detail": detail,
+                "code": code or codes.get(status, "request_failed"),
+                **({"fields": fields} if fields else {}),
+            },
+            status_code=status,
+        )
+
     @app.exception_handler(StoreError)
     async def store_error(request: Request, error: StoreError):
-        return JSONResponse({"detail": error.detail}, status_code=error.status)
+        return api_error(error.status, error.detail, error.fields, error.code)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, error: RequestValidationError):
-        return JSONResponse({"detail": "Проверьте поля запроса."}, status_code=422)
+        fields = {}
+        for issue in error.errors():
+            loc = [str(part) for part in issue["loc"][1:] if not isinstance(part, int)]
+            if loc[:1] == ["profile"]:
+                loc = loc[1:]
+            if not loc:
+                continue
+            message = {
+                "missing": "Заполните это поле.",
+                "too_long": "Сократите число значений.",
+                "too_short": "Добавьте хотя бы одно значение.",
+                "greater_than_equal": "Значение ниже допустимого.",
+                "less_than_equal": "Значение выше допустимого.",
+                "string_pattern_mismatch": "Проверьте формат значения.",
+                "value_error": "Проверьте введённые значения.",
+            }.get(issue["type"], "Недопустимое значение.")
+            fields[".".join(loc)] = message
+        return api_error(422, "Проверьте поля запроса.", fields)
 
     @app.exception_handler(DocumentFileError)
     async def document_error(request: Request, error: DocumentFileError):
-        return JSONResponse({"detail": str(error)}, status_code=422)
+        return api_error(422, str(error), {"file": str(error)}, "invalid_document")
 
     @app.middleware("http")
     async def protect(request: Request, call_next):
@@ -320,7 +358,7 @@ def create_app(
                 headers={"Retry-After": "60"},
             )
         except StoreError as error:
-            response = JSONResponse({"detail": error.detail}, status_code=error.status)
+            response = api_error(error.status, error.detail, error.fields, error.code)
         response.headers.update(
             {
                 "Cache-Control": "no-store, no-transform"
@@ -410,6 +448,7 @@ def create_app(
 
     if accounts or isinstance(store, PostgresStore):
         register_preferences_routes(app)
+        register_posting_routes(app)
 
     @app.get("/api/jobs")
     def jobs(
@@ -522,11 +561,17 @@ def create_app(
 
     @app.post("/api/template-drafts", status_code=201)
     async def upload(file: UploadFile, store: ScopedStore):
-        content = await file.read(10 * 1024 * 1024 + 1)
-        await file.close()
-        if len(content) > 10 * 1024 * 1024:
+        try:
+            content = await file.read(MAX_UPLOAD_BYTES + 1)
+        finally:
+            await file.close()
+        if len(content) > MAX_UPLOAD_BYTES:
             raise StoreError("Максимальный размер шаблона — 10 МБ.", 413)
         filename = Path(file.filename or "template").name
+        if not content:
+            raise StoreError("Файл пуст. Выберите PDF или DOCX с текстом.", 422, code="empty_file")
+        if Path(filename).suffix.casefold() not in {".pdf", ".docx"}:
+            raise StoreError("Выберите файл PDF или DOCX.", 422, code="unsupported_file")
         parsed = await asyncio.to_thread(parse_template, content, filename)
         directory = private_directory(settings, "templates", getattr(store, "user_id", None))
         path = directory / f"{uuid4()}{Path(filename).suffix.lower()}"
@@ -551,7 +596,7 @@ def create_app(
             )
         except DocumentFileError:
             raise StoreError("Исходный файл шаблона недоступен.", 404) from None
-        if path.stat().st_size > 10 * 1024 * 1024:
+        if path.stat().st_size > MAX_UPLOAD_BYTES:
             raise StoreError("Недопустимый размер исходного файла.", 422)
         expected = template.get("source_sha256") or (template.get("reference") or {}).get("sha256")
         if expected and not hmac.compare_digest(

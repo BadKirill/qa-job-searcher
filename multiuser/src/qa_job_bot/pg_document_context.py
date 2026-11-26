@@ -5,6 +5,7 @@ from sqlalchemy import select
 
 from qa_job_bot import pg_schema as s
 from qa_job_bot.pg_access import OwnedRepository
+from qa_job_bot.posting_details import MIN_DESCRIPTION
 from qa_job_bot.web_store import StoreError, digest
 
 
@@ -20,6 +21,12 @@ def document_job(job):
         "fetched_at",
         "last_seen_at",
         "source_status",
+        "posting",
+        "work_time",
+        "location_code",
+        "summary",
+        "language_evidence",
+        "description_quality",
     }
     return {key: copy.deepcopy(value) for key, value in job.items() if key not in excluded}
 
@@ -160,6 +167,11 @@ class PersonalDocumentContext(OwnedRepository):
                 raise StoreError(
                     "Историческая вакансия без описания. Обновите её перед генерацией.", 409
                 )
+            if (
+                pinned["job"].get("manual_version")
+                and len(pinned["job"].get("description", "")) < MIN_DESCRIPTION
+            ):
+                raise StoreError("Добавьте описание вакансии перед генерацией.", 409)
             messages = self.recent_messages(connection, conversation["id"], limit=16)
             template = self.active_document_template(connection)
             context = {

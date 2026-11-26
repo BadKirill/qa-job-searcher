@@ -24,12 +24,21 @@ from qa_job_bot.document_policy import (
     validate_review,
 )
 from qa_job_bot.maintenance import active as maintenance_active
+from qa_job_bot.openai_config import OpenAIConfigurationError, OpenAISettings
 from qa_job_bot.personal_files import checked_path, owner_root, private_directory
 from qa_job_bot.pg_store import PostgresStore
-from qa_job_bot.runtime_limits import QuotaExceeded
+from qa_job_bot.posting_details import (
+    PublicPostingSearch,
+    check_result,
+    fetch_posting,
+    same_posting,
+)
+from qa_job_bot.runtime_limits import QuotaExceeded, RuntimeLimits
 from qa_job_bot.search_pipeline import PersonalSearchPipeline
 from qa_job_bot.service import JobSearchService, build_sources
 from qa_job_bot.source_catalog import build_personal_sources
+from qa_job_bot.source_http import SourceClient
+from qa_job_bot.source_links import posting_link
 from qa_job_bot.storage import close_store, open_store
 from qa_job_bot.web_security import WebSettings
 from qa_job_bot.web_store import StoreError, WebStore
@@ -147,6 +156,8 @@ class Worker:
                     self.transition(
                         task, "ready", result={"count": len(report.jobs), "errors": report.errors}
                     )
+                elif task["kind"] == "posting_check":
+                    await self.posting_check(task)
                 elif task["kind"] == "chat":
                     await self.chat(task)
                 else:
@@ -169,6 +180,49 @@ class Worker:
                 task, "failed", error="Не удалось выполнить задание. Повторите попытку."
             )
         return True
+
+    async def posting_check(self, task):
+        payload = task["payload"]
+        job = payload["posting_job"]
+        factory = getattr(self.search_pipeline, "client_factory", None) or (
+            lambda: SourceClient(max_requests=3, max_response=4 * 1024 * 1024)
+        )
+        url = job.get("url") or ""
+        try:
+            direct = posting_link(url)
+        except ValueError:
+            direct = None
+        result = await fetch_posting(url, factory)
+        if not payload["manual"] and not direct and result.status == "unconfirmed":
+            result = await self.find_original_posting(task, job, factory)
+        self.store.complete_posting_check(task, self.id, result)
+
+    async def find_original_posting(self, task, job, factory):
+        try:
+            settings = OpenAISettings.load(self.settings.data_dir)
+        except OpenAIConfigurationError:
+            return check_result("unconfirmed", "Поиск оригинала временно недоступен.", "")
+        context = {"owner_id": task["user_id"], "task_id": task["id"], "execution_id": self.id}
+        limits = RuntimeLimits(self.store.database)
+        try:
+            reservation = limits.reserve(context, "posting_search")
+        except QuotaExceeded as error:
+            return check_result("unconfirmed", str(error), "")
+        if reservation is None:
+            return check_result("unconfirmed", "Поиск оригинала занят. Повторите позже.", "")
+        succeeded = False
+        try:
+            candidates = await PublicPostingSearch(settings).find(
+                job, lambda event, data: limits.progress(reservation, event, data)
+            )
+            succeeded = bool(candidates)
+            for candidate in candidates:
+                exact = await fetch_posting(candidate, factory)
+                if exact.job and same_posting(job, exact.job):
+                    return exact
+        finally:
+            limits.finish(reservation, succeeded)
+        return check_result("unconfirmed", "Поиск не подтвердил конкретное объявление.", "")
 
     async def chat(self, task: dict) -> None:
         payload = task["payload"]

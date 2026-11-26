@@ -28,6 +28,7 @@ export function Workspace({
   const [view, setView] = useState<
     View | "account" | "search_settings" | SetupPage
   >("active");
+  const backFromProfile = useRef(false);
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [revision, setRevision] = useState(0);
@@ -121,7 +122,7 @@ export function Workspace({
             aria-current={view === "applied" ? "page" : undefined}
           >
             <Icon name="applied" />
-            Applied
+            Отклики
           </button>
           <button
             className={view === "archive" ? "nav-item selected" : "nav-item"}
@@ -154,7 +155,7 @@ export function Workspace({
               }
             >
               <Icon name="search" />
-              Поиск и источники
+              Настройки поиска
             </button>
           )}
           {user && (
@@ -268,11 +269,13 @@ export function Workspace({
             />
           ) : view === "profile" ? (
             profile ? (
-              <Profile
-                profile={profile}
-                revision={revision}
-                onChange={reload}
-              />
+              <>
+                {backFromProfile.current && <button type="button" className="text-button" onClick={() => {
+                  backFromProfile.current = false;
+                  setView("manual");
+                }}>Вернуться к добавленным вакансиям</button>}
+                <Profile profile={profile} revision={revision} onChange={reload} />
+              </>
             ) : (
               <Loading text="Загружаем профиль…" />
             )
@@ -280,11 +283,12 @@ export function Workspace({
             <Jobs
               personal={!!user}
               key={view}
-              tab={view === "applied" || view === "archive" ? view : "active"}
+              tab={view === "applied" || view === "archive" || view === "manual" ? view : "active"}
+              onManual={() => setView("manual")}
               revision={revision}
               tasks={tasks}
               hasTemplate={!!profile?.active}
-              onProfile={() => setView("profile")}
+              onProfile={() => { backFromProfile.current = view === "manual"; setView("profile"); }}
               onTask={reload}
             />
           )}

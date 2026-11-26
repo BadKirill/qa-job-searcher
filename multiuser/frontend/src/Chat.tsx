@@ -1,5 +1,5 @@
-import { useEffect, useId, useState } from "react";
-import { errorMessage, request, requestId } from "./api";
+import { useEffect, useRef, useId, useState } from "react";
+import { errorMessage, forgetOperation, operationKey, request } from "./api";
 import { Icon, Loading, Notice } from "./components";
 import type { Message } from "./types";
 
@@ -81,9 +81,11 @@ export function Chat({
       active = false;
     };
   }, [conversationId, revision, refresh]);
+  const operations = useRef(new Map<string, string>());
   async function send(event: React.FormEvent) {
     event.preventDefault();
     if (!text.trim() || sending) return;
+    const key = `chat:${conversationId}:${text.trim()}`;
     setSending(true);
     setError("");
     try {
@@ -91,12 +93,14 @@ export function Chat({
         `/conversations/${encodeURIComponent(conversationId)}/messages`,
         {
           method: "POST",
-          body: { text: text.trim(), request_id: requestId() },
+          body: { text: text.trim(), request_id: operationKey(operations.current, key) },
         },
       );
+      forgetOperation(operations.current, key);
       setText("");
       setRefresh((value) => value + 1);
     } catch (failure) {
+      forgetOperation(operations.current, key, failure);
       setError(errorMessage(failure));
     } finally {
       setSending(false);
@@ -104,6 +108,7 @@ export function Chat({
   }
   async function regenerate() {
     if (!jobId || !documentKind || regenerating) return;
+    const key = `document:${jobId}:${conversationId}:${documentKind}`;
     setRegenerating(true);
     setGenerationQueued(false);
     setError("");
@@ -113,14 +118,16 @@ export function Chat({
         body: {
           kind: documentKind,
           language: documentKind === "cv" ? "en" : "auto",
-          request_id: requestId(),
+          request_id: operationKey(operations.current, key),
           ...(conversationId ? { conversation_id: conversationId } : {}),
           ...(snapshotId ? { snapshot_id: snapshotId } : {}),
         },
       });
+      forgetOperation(operations.current, key);
       setGenerationQueued(true);
       onGenerated?.();
     } catch (failure) {
+      forgetOperation(operations.current, key, failure);
       setError(errorMessage(failure));
     } finally {
       setRegenerating(false);
