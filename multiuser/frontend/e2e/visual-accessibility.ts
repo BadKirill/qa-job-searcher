@@ -4,8 +4,12 @@ export async function expectReadableColors(page: Page) {
   const failures = await page.evaluate(() => {
     type Color = [number, number, number, number];
     const parse = (value: string): Color => {
-      const parts = value.match(/[\d.]+/g)!.map(Number);
-      return [parts[0], parts[1], parts[2], parts[3] ?? 1];
+      const srgbPrefix = "color(srgb ";
+      const isNormalized = value.startsWith(srgbPrefix);
+      const start = isNormalized ? srgbPrefix.length : value.indexOf("(") + 1;
+      const [red, green, blue, alpha = 1] = value.slice(start, -1).split(/[,/\s]+/).map(Number);
+      const scale = isNormalized ? 255 : 1;
+      return [red * scale, green * scale, blue * scale, alpha];
     };
     const over = (front: Color, back: Color): Color => [
       front[0] * front[3] + back[0] * (1 - front[3]),

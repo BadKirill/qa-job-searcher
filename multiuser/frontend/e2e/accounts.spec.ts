@@ -1740,6 +1740,7 @@ test("layout stays aligned across workspace pages and viewport sizes", async ({ 
           await contained(member);
           await member.screenshot({ path: `test-results/design-sources-${width}.png`, fullPage: true });
           await member.getByRole("button", { name: "Критерии", exact: true }).click();
+          await member.getByText("История версий профиля", { exact: true }).hover();
           await contained(member);
         }
         if (image === "account") {
