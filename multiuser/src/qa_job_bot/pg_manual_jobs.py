@@ -6,8 +6,25 @@ from qa_job_bot import pg_schema as s
 from qa_job_bot.models import Job, utcnow
 from qa_job_bot.pg_access import OwnedRepository
 from qa_job_bot.pg_jobs import public_payload
-from qa_job_bot.posting_details import posting_observation_key
-from qa_job_bot.web_store import StoreError, digest
+from qa_job_bot.posting_details import (
+    known_posting_link,
+    last_confirmed_posting,
+    posting_observation_key,
+)
+from qa_job_bot.web_store import ACTIVE_STATUSES, StoreError, digest
+
+AUTOMATIC_POSTING_LIMIT = 10
+AUTOMATIC_POSTING_INTERVAL = 3 * 3600
+
+
+def posting_job_payload(job_id, job, previous, manual=False):
+    return {
+        "job_id": job_id,
+        "posting_hash": digest(job),
+        "posting_job": job,
+        "manual": manual,
+        "original_url": last_confirmed_posting(previous).get("url"),
+    }
 
 
 class ManualJobs(OwnedRepository):
@@ -125,16 +142,47 @@ class ManualJobs(OwnedRepository):
             scope = f"posting_check:{job_id}:{key}"
             if not self.pending_scope(connection, scope):
                 self.reserve_posting_request(connection, now)
-            payload = {
-                "job_id": job_id,
-                "posting_hash": key,
-                "posting_job": job,
-                "manual": bool(row["personal_payload"].get("manual")),
-            }
+            payload = posting_job_payload(
+                job_id, job, previous or {}, bool(row["personal_payload"].get("manual"))
+            )
             task_id = self.enqueue_in(
                 connection, "posting_check", scope, payload, request_id, request
             )
             return {"task": self.task_data(connection, task_id)}
+
+    def enqueue_posting_checks_after_search(self, connection, matches, ids, now):
+        pending = set(
+            connection.execute(
+                select(s.tasks.c.scope).where(
+                    self.owned(s.tasks),
+                    s.tasks.c.kind == "posting_check",
+                    s.tasks.c.status.in_(ACTIVE_STATUSES),
+                )
+            ).scalars()
+        )
+        remaining = AUTOMATIC_POSTING_LIMIT - len(pending)
+        if remaining <= 0:
+            return
+        cache = self.setting(connection, "posting_checks", {})
+        candidates = []
+        for job_id in ids:
+            job = matches[job_id]["job"]
+            key = digest(job)
+            scope = f"posting_check:{job_id}:{key}"
+            previous = cache.get(posting_observation_key(job_id, key), {})
+            due = previous.get("auto_after", previous.get("next_at", 0))
+            url = last_confirmed_posting(previous).get("url") or job.get("url")
+            if due <= now and scope not in pending and known_posting_link(url):
+                candidates.append((due, scope, posting_job_payload(job_id, job, previous)))
+        for _, scope, payload in sorted(candidates, key=lambda item: item[0])[:remaining]:
+            self.enqueue_in(
+                connection,
+                "posting_check",
+                scope,
+                payload,
+                str(uuid4()),
+                {"operation": "posting_check", "job_id": payload["job_id"]},
+            )
 
     def complete_posting_check(self, task, worker_id, result):
         with self.write() as connection:
@@ -153,10 +201,19 @@ class ManualJobs(OwnedRepository):
             if not checked:
                 return False
             cache = self.setting(connection, "posting_checks", {})
-            cache[posting_observation_key(job_id, key)] = {
-                "next_at": utcnow().timestamp() + 300,
-                "status": result.public_status(),
-                "original": result.job,
+            now = utcnow().timestamp()
+            observation = posting_observation_key(job_id, key)
+            previous = cache.get(observation, {})
+            status = result.public_status()
+            confirmed = (
+                status if result.status in {"open", "closed"} else last_confirmed_posting(previous)
+            )
+            cache[observation] = {
+                "next_at": now + 300,
+                "auto_after": now + AUTOMATIC_POSTING_INTERVAL,
+                "status": status,
+                "last_confirmed": confirmed,
+                "original": result.job or previous.get("original"),
             }
             self.put_setting(connection, "posting_checks", cache)
             self.touch(connection)

@@ -25,7 +25,10 @@ from qa_job_bot.web_store import StoreError
 from qa_job_bot.work_time import display_work_time
 
 ORIGINAL = "https://job-boards.greenhouse.io/example/jobs/123"
-ORIGINAL_TEXT = "Build product features using Python and maintain reliable application services."
+ORIGINAL_TEXT = (
+    "Build product features using Python and maintain reliable application services. "
+    "Own the event pipeline for school enrollment and automate its reconciliation tests."
+)
 
 
 def vacancy(**fields):
@@ -71,6 +74,12 @@ def criteria(**fields):
             "hiring_location_match",
         ),
         ({"location": "US only"}, {}, "blocked", "hiring_location_mismatch"),
+        (
+            {"description": "Fully remote. Remote from the United States."},
+            {},
+            "blocked",
+            "hiring_location_mismatch",
+        ),
         ({"location": "Worldwide, except Georgia"}, {}, "blocked", "employer_exclusion"),
         (
             {"description": "Where you can work\n- Chile\n- Mexico\n- Colombia"},
@@ -86,6 +95,15 @@ def criteria(**fields):
         ),
         (
             {"description": "Working hours required: 9 am–5 pm US Eastern."},
+            {"availability": {"zone": "Asia/Tbilisi", "start": "09:00", "end": "17:00"}},
+            "blocked",
+            "working_hours_conflict",
+        ),
+        (
+            {
+                "description": "Flexible working hours. You can start at 3 PM. "
+                "Must overlap with 9 am–5 pm US Eastern."
+            },
             {"availability": {"zone": "Asia/Tbilisi", "start": "09:00", "end": "17:00"}},
             "blocked",
             "working_hours_conflict",
@@ -380,13 +398,22 @@ async def test_ats_contracts_keep_declared_and_unconfirmed_states_separate(statu
         assert result.job["description"] == ORIGINAL_TEXT
         assert result.job["description_quality"] == "full"
         assert same_posting(
-            {"title": "Backend Engineer", "company": "Example", "source_id": "123"}, result.job
+            {"title": "Backend Engineer", "company": "Example", "url": ORIGINAL}, result.job
         )
         assert not same_posting(
             {"title": "Backend Engineer", "company": "Other", "source_id": "123"}, result.job
         )
+        public_job = {
+            "title": "Backend Engineer",
+            "company": "Example",
+            "url": "https://remotive.com/remote-jobs/example-98745",
+            "source_id": "98745",
+            "description": ORIGINAL_TEXT,
+        }
+        assert same_posting(public_job, result.job)
+        assert not same_posting({**public_job, "description": "Engineering position."}, result.job)
         assert not same_posting(
-            {"title": "Backend Engineer", "company": "Example", "source_id": "456"}, result.job
+            {**public_job, "url": ORIGINAL.replace("/123", "/456")}, result.job
         )
 
 
@@ -502,6 +529,48 @@ def test_summary_has_original_evidence_and_skips_missing_fields():
     assert all(item["url"] == ORIGINAL and item["evidence"] in description for item in items)
 
 
+def test_summary_extracts_company_and_role_from_prose_without_labelled_fields():
+    description = (
+        "About us\nWe are a fintech company founded in 2018 with 100 employees.\n"
+        "About the role\nYou will design onboarding for business clients."
+    )
+    items = posting_summary(description, extract_details(description), ORIGINAL)
+    fields = {item["field"]: item["value"] for item in items}
+    assert fields["industry"] == "fintech"
+    assert fields["company_size"] == "100 employees"
+    assert fields["founded"] == "2018"
+    assert "onboarding" in fields["role_focus"]
+    assert "experience" not in fields
+    assert all(item["evidence"] in description for item in items)
+
+
+def test_work_time_prefers_explicit_hours_and_preserves_a_standalone_zone():
+    day = date(2026, 11, 26)
+    required = display_work_time(
+        "Flexible working hours. Must overlap with 9 am–5 pm US Eastern.", None, day
+    )
+    assert required["mandatory"] and required["start"] == "09:00" and not required["needs_review"]
+    zone_only = display_work_time("Fully remote, CET.", None, day)
+    assert zone_only["zone"] == "UTC+01:00" and zone_only["needs_review"]
+
+
+def test_automatic_posting_checks_are_bounded_and_require_an_ats_link(pg_store):
+    configure(pg_store)
+    search = started(pg_store)
+    jobs = [vacancy(source_id=str(index), url=f"{ORIGINAL}{index}") for index in range(12)]
+    jobs.append(
+        vacancy(source_id="aggregator", url="https://remotive.com/remote-jobs/example-98745")
+    )
+    assert pg_store.complete_search(search, "worker", [batch(search, jobs)])
+    checks = [task for task in pg_store.tasks() if task["kind"] == "posting_check"]
+    assert len(checks) == 10
+    assert all(
+        pg_store.task(task["id"], internal=True)["payload"]["posting_job"]["source_id"]
+        != "aggregator"
+        for task in checks
+    )
+
+
 async def test_posting_worker_keeps_history_and_applied_during_close_and_reopen(
     pg_store,
     tmp_path,
@@ -518,7 +587,7 @@ async def test_posting_worker_keeps_history_and_applied_during_close_and_reopen(
     search = started(pg_store)
     assert pg_store.complete_search(search, "worker", [batch(search, [vacancy()])])
     item = pg_store.list_jobs("active", 1)["items"][0]
-    statuses = iter((404, 200))
+    statuses = iter((404, 403, 200))
 
     def handler(request):
         return httpx.Response(
@@ -537,7 +606,9 @@ async def test_posting_worker_keeps_history_and_applied_during_close_and_reopen(
     worker = Worker(
         pg_store, WebSettings(tmp_path), search_pipeline=PersonalSearchPipeline(factory)
     )
-    first = pg_store.enqueue_posting_check(item["id"], "request-1")["task"]
+    checks = [task for task in pg_store.tasks() if task["kind"] == "posting_check"]
+    assert len(checks) == 1 and checks[0]["status"] == "queued"
+    first = checks[0]
     assert pg_store.enqueue_posting_check(item["id"], "request-retry")["task"]["id"] == first["id"]
     assert await worker.once()
     result = pg_store.task(first["id"])
@@ -554,6 +625,13 @@ async def test_posting_worker_keeps_history_and_applied_during_close_and_reopen(
     second = pg_store.enqueue_posting_check(item["id"], "request-3")["task"]
     assert second["id"] != first["id"]
     assert await worker.once()
-    assert pg_store.list_jobs("archive", 1)["items"][0]["posting"]["status"] == "open"
+    assert pg_store.task(second["id"])["result"]["posting"]["status"] == "unconfirmed"
+    assert pg_store.list_jobs("archive", 1)["items"][0]["posting"]["status"] == "closed"
     pg_store.change_state(item["id"], {"applied": False, "archived": False})
+    assert pg_store.list_jobs("active", 1)["items"] == []
+    monkeypatch.setattr(pg_manual_jobs, "utcnow", lambda: later + timedelta(minutes=6))
+    third = pg_store.enqueue_posting_check(item["id"], "request-4")["task"]
+    assert third["id"] != second["id"]
+    assert await worker.once()
+    assert pg_store.task(third["id"])["result"]["posting"]["status"] == "open"
     assert pg_store.list_jobs("active", 1)["items"][0]["description"] == ORIGINAL_TEXT

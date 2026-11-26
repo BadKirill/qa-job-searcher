@@ -15,10 +15,15 @@ from qa_job_bot.job_details import extract_details
 from qa_job_bot.job_language import language_display
 from qa_job_bot.models import canonical_text, utcnow
 from qa_job_bot.pg_access import OwnedRepository, upsert
-from qa_job_bot.posting_details import posting_observation_key, verified_description
+from qa_job_bot.posting_details import (
+    last_confirmed_posting,
+    posting_observation_key,
+    verified_description,
+)
 from qa_job_bot.posting_summary import posting_summary
 from qa_job_bot.repository import JobRepository
 from qa_job_bot.web_store import StoreError, digest
+from qa_job_bot.work_time import display_work_time
 
 
 def public_payload(job):
@@ -181,16 +186,25 @@ class PersonalJobs(OwnedRepository):
         data["payload"] = data["personal_payload"].get("job", data["payload"])
         return data
 
-    def card_data(self, connection, row, card=None):
+    def card_data(self, connection, row, card=None, search_run=None):
         card = card or row.get("personal_payload", {})
-        job = card.get("job", row["payload"])
-        observation = posting_observation_key(row["id"], digest(job))
+        saved_job = card.get("job", row["payload"])
+        observation = posting_observation_key(row["id"], digest(saved_job))
         check = self.setting(connection, "posting_checks", {}).get(observation, {})
-        original = check.get("original")
-        if not (card.get("manual") or card.get("historical")):
-            job = verified_description(job, check)
+        confirmed = last_confirmed_posting(check)
+        job = (
+            saved_job
+            if card.get("manual") or card.get("historical")
+            else verified_description(saved_job, check)
+        )
         description = job.get("description", "")
         details = extract_details(description, job["title"])
+        work_time = card.get("work_time")
+        if job is not saved_job or "work_time" not in card:
+            run = search_run or {}
+            availability = run.get("inputs", {}).get("profile", {}).get("availability")
+            checked_on = datetime.fromisoformat(run["created_at"]) if run else row["last_seen_at"]
+            work_time = display_work_time(description, availability, checked_on.date())
         return {
             **job,
             "id": row["id"],
@@ -198,9 +212,9 @@ class PersonalJobs(OwnedRepository):
             "match_reasons": card.get("reasons", row["reasons"]),
             "location_status": card.get("location_status", row["location_status"]),
             "location_code": card.get("location_code"),
-            "work_time": card.get("work_time"),
+            "work_time": work_time,
             "manual_version": card.get("manual_version"),
-            "posting": check.get("status"),
+            "posting": confirmed if confirmed.get("status") == "closed" else check.get("status"),
             "description_quality": (job.get("description_quality") or "fragment")
             if description
             else "missing",
@@ -213,9 +227,7 @@ class PersonalJobs(OwnedRepository):
             "russian_company": is_russian_company(job.get("description", ""), job["company"]),
             "details": details,
             "language_evidence": language_display(description, job["company"]),
-            "summary": posting_summary(
-                description, details, (original or {}).get("url") or job["url"]
-            ),
+            "summary": posting_summary(description, details, job["url"]),
             "documents": self.task_list(connection, row["id"]),
         }
 
@@ -391,7 +403,7 @@ class PersonalJobs(OwnedRepository):
             cached_job = card.get("job", {})
             check = checks.get(posting_observation_key(key, digest(cached_job)), {})
             if tab == "active" and not run_id and check:
-                if check["status"]["status"] == "closed":
+                if last_confirmed_posting(check).get("status") == "closed":
                     continue
                 if (
                     inputs.get("profile")
@@ -418,7 +430,10 @@ class PersonalJobs(OwnedRepository):
         with self.read() as connection:
             items = [
                 self.card_data(
-                    connection, self.job_row(connection, key), frozen.get("cards", {}).get(key)
+                    connection,
+                    self.job_row(connection, key),
+                    frozen.get("cards", {}).get(key),
+                    frozen.get("search_run"),
                 )
                 for key in selected[(page - 1) * 10 : page * 10]
             ]

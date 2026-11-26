@@ -95,6 +95,7 @@ def synthetic_cv(name, index):
 async def exercise(database, directory, gateway):
     password, stores, vacancies, identifiers = secrets.token_urlsafe(24), [], [], []
     names = ("Synthetic Alpha", "Synthetic Beta")
+    kinds = ("cv", "cover_letter")
     for index, name in enumerate(names):
         user = database.create_user(f"smoke-{index}", name)
         with database.transaction() as connection:
@@ -171,8 +172,8 @@ async def exercise(database, directory, gateway):
             task = await client.post(
                 f"/api/jobs/{identifiers[index]}/documents",
                 json={
-                    "kind": "cv",
-                    "language": "en",
+                    "kind": kinds[index],
+                    "language": "en" if kinds[index] == "cv" else "auto",
                     "request_id": "positive",
                 },
             )
@@ -186,6 +187,7 @@ async def exercise(database, directory, gateway):
         await asyncio.gather(worker.once("document"), worker.once("document"))
         for index, client in enumerate(clients):
             task = (await client.get(f"/api/tasks/{tasks[index]}")).json()
+            require(task["kind"] == kinds[index], "Smoke document kind changed")
             require(task["status"] == "ready", "Live positive document did not pass all checks")
             require(len(task["artifacts"]) == 2, "Live document lacks DOCX or PDF")
             for call in task["result"]["calls"]:
@@ -260,6 +262,7 @@ async def exercise(database, directory, gateway):
         return {
             "users": 2,
             "positive_documents": 2,
+            "downloaded_kinds": list(kinds),
             "negative_blocked": True,
             "distinct_agent_sessions": len(sessions),
             "mcp": "stdio",

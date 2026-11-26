@@ -45,6 +45,7 @@ async def test_smoke_driver_checks_two_documents_sessions_downloads_and_a_negati
     assert result == {
         "users": 2,
         "positive_documents": 2,
+        "downloaded_kinds": ["cv", "cover_letter"],
         "negative_blocked": True,
         "distinct_agent_sessions": 7,
         "mcp": "stdio",

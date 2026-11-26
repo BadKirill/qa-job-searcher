@@ -25,6 +25,10 @@ ZONE = re.compile(
     + r")\b",
     re.I,
 )
+STANDALONE_ZONE = re.compile(
+    r"\b(?:CET|CEST|UTC|GMT|EST|EDT|PST|PDT|US Eastern|US Pacific|Eastern Time|Pacific Time)\b"
+    r"|[A-Z][a-z_]+/[A-Z][\w/-]+"
+)
 RANGE = re.compile(
     r"\b(\d{1,2}(?::[0-5]\d)?)(?:\s*(am|pm))?\s*(?:[–—-]|to)\s*"
     r"(\d{1,2}(?::[0-5]\d)?)(?:\s*(am|pm))?\b",
@@ -68,12 +72,12 @@ def iso_clock(value, suffix):
     return f"{number:02d}:{minute or '00'}" if number < 24 else None
 
 
-def work_time(description):
+def work_times(description):
     for line in re.split(r"\n|(?<=[.!?])\s+", description):
-        if not CONTEXT.search(line):
+        window, match = RANGE.search(line), ZONE.search(line)
+        if not (CONTEXT.search(line) or STANDALONE_ZONE.search(line) or window and match):
             continue
         start = end = zone = None
-        window, match = RANGE.search(line), ZONE.search(line)
         if window:
             left, ampm, right, end_ampm = window.groups()
             start, end = iso_clock(left, ampm or end_ampm), iso_clock(right, end_ampm)
@@ -90,7 +94,7 @@ def work_time(description):
                 zone = None
         if window or match or re.search(r"\d\s*(?:am|pm)\b|working hours?|core hours", line, re.I):
             overlap = OVERLAP.search(line)
-            return WorkTime(
+            yield WorkTime(
                 line.strip()[:500],
                 zone,
                 start,
@@ -98,7 +102,18 @@ def work_time(description):
                 bool(REQUIRED.search(line) or overlap),
                 int(overlap[1]) if overlap else None,
             )
-    return None
+
+
+def work_time(description):
+    return max(
+        work_times(description),
+        key=lambda item: (
+            item.mandatory,
+            bool(item.zone and item.start and item.end),
+            bool(item.zone),
+        ),
+        default=None,
+    )
 
 
 def local_window(day, start, end, zone):

@@ -236,7 +236,9 @@ export function JobCard({
       ))}
       {workTime && (
         <p className="small">
-          {workTime.needs_review ? "Проверьте рабочие часы" : `${workTime.mandatory ? "Обязательные часы" : "Рабочие часы"} · ${workTime.start}–${workTime.end} ${workTime.zone}`}
+          {workTime.needs_review
+            ? workTime.zone ? `Часовой пояс · ${workTime.zone} · Проверьте рабочие часы` : "Проверьте рабочие часы"
+            : `${workTime.mandatory ? "Обязательные часы" : "Рабочие часы"} · ${workTime.start}–${workTime.end} ${workTime.zone}`}
           {workTime.local_start && workTime.local_end && ` · ваше время ${workTime.local_start.slice(11, 16)}–${workTime.local_end.slice(11, 16)}`}
           {" · "}{workTime.evidence}
         </p>
@@ -262,28 +264,33 @@ export function JobCard({
           ))}
         </div>
       )}
-      <div className="job-sections">
-        {job.details.responsibilities.length > 0 && (
-          <section>
-            <h3>Чем предстоит заниматься</h3>
-            <ul>
-              {job.details.responsibilities.map((item, index) => (
-                <li key={index}>{item}</li>
-              ))}
-            </ul>
-          </section>
-        )}
-        {job.details.requirements.length > 0 && (
-          <section>
-            <h3>Что понадобится</h3>
-            <ul>
-              {job.details.requirements.map((item, index) => (
-                <li key={index}>{item}</li>
-              ))}
-            </ul>
-          </section>
-        )}
-      </div>
+      {(job.details.responsibilities.length > 0 || job.details.requirements.length > 0) && (
+        <details className="job-description">
+          <summary>Обязанности и требования</summary>
+          <div className="job-sections">
+            {job.details.responsibilities.length > 0 && (
+              <section>
+                <h3>Чем предстоит заниматься</h3>
+                <ul>
+                  {job.details.responsibilities.map((item, index) => (
+                    <li key={index}>{item}</li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {job.details.requirements.length > 0 && (
+              <section>
+                <h3>Что понадобится</h3>
+                <ul>
+                  {job.details.requirements.map((item, index) => (
+                    <li key={index}>{item}</li>
+                  ))}
+                </ul>
+              </section>
+            )}
+          </div>
+        </details>
+      )}
       {job.description && (
         <details className="job-description">
           <summary>

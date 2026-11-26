@@ -342,6 +342,7 @@ class PersonalSearchRuns(OwnedRepository):
                     ("search_errors", errors),
                 ]:
                     self.put_setting(connection, key, value)
+                self.enqueue_posting_checks_after_search(connection, matches, ids, now.timestamp())
             changed = connection.execute(
                 update(s.tasks)
                 .where(*self.live_lease(task["id"], worker_id))

@@ -31,6 +31,7 @@ from qa_job_bot.posting_details import (
     PublicPostingSearch,
     check_result,
     fetch_posting,
+    known_posting_link,
     same_posting,
 )
 from qa_job_bot.runtime_limits import QuotaExceeded, RuntimeLimits
@@ -38,7 +39,6 @@ from qa_job_bot.search_pipeline import PersonalSearchPipeline
 from qa_job_bot.service import JobSearchService, build_sources
 from qa_job_bot.source_catalog import build_personal_sources
 from qa_job_bot.source_http import SourceClient
-from qa_job_bot.source_links import posting_link
 from qa_job_bot.storage import close_store, open_store
 from qa_job_bot.web_security import WebSettings
 from qa_job_bot.web_store import StoreError, WebStore
@@ -187,11 +187,8 @@ class Worker:
         factory = getattr(self.search_pipeline, "client_factory", None) or (
             lambda: SourceClient(max_requests=3, max_response=4 * 1024 * 1024)
         )
-        url = job.get("url") or ""
-        try:
-            direct = posting_link(url)
-        except ValueError:
-            direct = None
+        url = payload.get("original_url") or job.get("url") or ""
+        direct = known_posting_link(url)
         result = await fetch_posting(url, factory)
         if not payload["manual"] and not direct and result.status == "unconfirmed":
             result = await self.find_original_posting(task, job, factory)
@@ -216,10 +213,13 @@ class Worker:
                 job, lambda event, data: limits.progress(reservation, event, data)
             )
             succeeded = bool(candidates)
+            matches = {}
             for candidate in candidates:
                 exact = await fetch_posting(candidate, factory)
                 if exact.job and same_posting(job, exact.job):
-                    return exact
+                    matches[exact.url] = exact
+            if len(matches) == 1:
+                return next(iter(matches.values()))
         finally:
             limits.finish(reservation, succeeded)
         return check_result("unconfirmed", "Поиск не подтвердил конкретное объявление.", "")

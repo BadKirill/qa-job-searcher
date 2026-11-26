@@ -797,7 +797,15 @@ export function SearchSettings({
                     }
                   />
                   <div className="criteria-save-bar">
-                    <div role="status">{criteriaNotice}{dirty && " · Есть несохранённые изменения"}</div>
+                    <div className={criteriaNotice ? "criteria-save-notice" : "sr-only"}>
+                      <span role="status">{criteriaNotice}</span>
+                      {criteriaNotice && (
+                        <button type="button" className="text-button" onClick={() => setCriteriaNotice("")}>
+                          Закрыть уведомление
+                        </button>
+                      )}
+                    </div>
+                    {dirty && <span role="status">Есть несохранённые изменения</span>}
                     <button className="button primary" type="submit">Сохранить</button>
                     <button className="button secondary" type="button" onClick={() => setShowNew(true)}>
                       Сохранить как новую версию

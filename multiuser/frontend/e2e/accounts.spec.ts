@@ -1813,9 +1813,14 @@ test("manual vacancy preview saves privately and both documents use the checked 
     await card.getByRole("button", { name: "Сделать CV", exact: true }).click();
     await card.getByRole("button", { name: "Сделать кавер леттер", exact: true }).click();
     await expect(card.getByRole("link", { name: "Скачать PDF" })).toHaveCount(2);
-    const received = member.waitForEvent("download");
-    await card.getByRole("link", { name: "Скачать PDF" }).first().click();
-    expect(await (await received).failure()).toBeNull();
+    for (const kind of ["CV", "Cover letter"]) {
+      const document = card.locator(".task-status").filter({
+        has: member.getByText(kind, { exact: true }),
+      });
+      const received = member.waitForEvent("download");
+      await document.getByRole("link", { name: "Скачать PDF" }).click();
+      expect(await (await received).failure()).toBeNull();
+    }
     const job = (await (await member.request.get(`${origin}/api/jobs?tab=manual`)).json()).items[0];
     expect((await page.request.post(`${origin}/api/jobs/${job.id}/check-posting`, {
       headers: await headers(page), data: { request_id: "foreign-posting" },
@@ -1896,6 +1901,9 @@ test("geography and required hours filter the actual search with keyboard select
     await member.getByLabel("Показывать удалённые вакансии с неясной географией").check();
     await member.getByRole("button", { name: "Сохранить", exact: true }).click();
     await expect(member.getByText(/^Сохранено ·/)).toBeVisible();
+    await expect(member.locator(".criteria-save-notice")).toBeVisible();
+    await member.getByRole("button", { name: "Закрыть уведомление" }).click();
+    await expect(member.locator(".criteria-save-notice")).toHaveCount(0);
     await member.getByRole("button", { name: /Вакансии/ }).first().click();
     await launchSearch(member);
     await member.getByRole("button", { name: /Показать свежую выдачу/ }).click();
@@ -1910,7 +1918,7 @@ test("geography and required hours filter the actual search with keyboard select
   }
 });
 
-test("original ATS enriches a fragment while closed and unverifiable results stay distinct", async ({ page, browser }) => {
+test("automatic ATS checks enrich a fragment and hide a confirmed closure", async ({ page, browser }) => {
   await signIn(page);
   const invitation = await invite(page, "feedback-posting");
   const context = await browser.newContext();
@@ -1927,17 +1935,15 @@ test("original ATS enriches a fragment while closed and unverifiable results sta
     await launchSearch(member);
     await member.getByRole("button", { name: /Показать свежую выдачу/ }).click();
     const open = member.getByRole("article", { name: "Platform Specialist · Open" });
-    await open.getByText("Фрагмент описания", { exact: false }).click();
-    await open.getByRole("button", { name: "Найти полное описание" }).click();
-    await expect(open.getByText("Отрасль", { exact: true })).toBeVisible();
+    await expect(open.getByText(/Отрасль · fintech/i)).toBeVisible();
+    await expect(open.getByText(/100 employees/).first()).toBeVisible();
+    await expect(open.getByText(/Часовой пояс · UTC\+01:00/)).toBeVisible();
     await expect(open.getByText(/Требуются · английский и русский/)).toBeVisible();
     await expect(open.getByText(/Открыта ·/)).toBeVisible();
     const unknown = member.getByRole("article", { name: "Platform Specialist · Unknown" });
-    await unknown.getByRole("button", { name: "Найти полное описание" }).click();
     await expect(unknown.getByText(/Не удалось подтвердить ·/)).toBeVisible();
     await expect(unknown.getByText("Фрагмент описания", { exact: false })).toBeVisible();
     const closed = member.getByRole("article", { name: "Platform Specialist · Closed" });
-    await closed.getByRole("button", { name: "Найти полное описание" }).click();
     await expect(closed).toHaveCount(0);
     await expect(member.getByRole("article")).toHaveCount(2);
   } finally {

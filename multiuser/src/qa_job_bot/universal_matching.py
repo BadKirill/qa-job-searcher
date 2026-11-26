@@ -22,7 +22,7 @@ from qa_job_bot.matching import (
     _restriction_contexts,
 )
 from qa_job_bot.models import utcnow
-from qa_job_bot.work_time import time_conflicts, work_time
+from qa_job_bot.work_time import time_conflicts, work_times
 
 
 def excludes_candidate(text, locations):
@@ -182,7 +182,9 @@ OFFICE_LOCATION = re.compile(
     r"\b(?:office (?:is )?in|based (?:at|in) our office in|офис в)\s+([^.;!\n]+)", re.I
 )
 TEAM_LOCATION = re.compile(r"\bbased (?:team|office|company|headquarters)\b", re.I)
-REMOTE_SCOPE = re.compile(r"\b(?:remote (?:in|across|within)|удал[её]нно (?:из|в))\b", re.I)
+REMOTE_SCOPE = re.compile(
+    r"\b(?:remote(?:ly)? (?:in|across|within|from)|удал[её]нно (?:из|в))\b", re.I
+)
 BROAD = {"region:europe", "region:emea", "region:mena", "region:latam", "region:apac", "region:cis"}
 
 
@@ -374,8 +376,9 @@ def geography_decision(job, profile):
 
 def location_decision(job, profile, day=None):
     decision = geography_decision(job, profile)
-    if decision.status in {"allowed", "unknown"} and time_conflicts(
-        work_time(job.description), profile.availability, day or utcnow().date()
+    if decision.status in {"allowed", "unknown"} and any(
+        time_conflicts(requirement, profile.availability, day or utcnow().date())
+        for requirement in work_times(job.description)
     ):
         return GeographyDecision(
             "blocked", "working_hours_conflict", "Обязательные часы вне вашей доступности"

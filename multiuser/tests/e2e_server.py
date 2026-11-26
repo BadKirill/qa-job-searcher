@@ -249,8 +249,10 @@ def fixture_source_client(include_qa=False, **kwargs):
                     "company_name": "Example Company",
                     "location": {"name": "Worldwide"},
                     "content": (
-                        "<p>Industry: Education</p><p>Company size: 50–200</p>"
-                        "<p>Role focus: Platform reliability</p>"
+                        "<h2>About us</h2>"
+                        "<p>We are a fintech company founded in 2018 with 100 employees.</p>"
+                        "<h2>About the role</h2><p>You will improve platform reliability.</p>"
+                        "<p>Time zone: CET</p>"
                         "<p>Requirements: Russian and English</p>"
                         "<p>Build reliable software with Python. "
                         "At least 4 years of experience.</p>"
@@ -266,12 +268,13 @@ def fixture_source_client(include_qa=False, **kwargs):
                     "Candidates must reside in Serbia or Republic of Georgia.",
                 ),
                 "US": ("US only", ""),
+                "Remote from US": ("Worldwide", "Remote from the United States."),
                 "Except Georgia": ("Worldwide, except Georgia", ""),
                 "Latin America": ("Worldwide", "Where you can work\nChile\nMexico\nColombia"),
                 "US team": ("Worldwide", "Work with our US-based team."),
                 "Required hours": (
                     "Worldwide",
-                    "Mandatory working hours: 9 AM to 5 PM US Eastern.",
+                    "Flexible working hours. Must overlap with 9 AM to 5 PM US Eastern.",
                 ),
                 "Incomplete hours": ("Worldwide", "You can start at 3 PM"),
             }
