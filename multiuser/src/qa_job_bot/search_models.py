@@ -65,6 +65,7 @@ class SearchSpec(StrictInput):
     workplace_types: Annotated[
         list[Literal["remote", "hybrid", "on-site"]], Field(min_length=1, max_length=3)
     ] = ["remote"]
+    working_languages: Annotated[list[Literal["ru", "en"]], Field(max_length=2)] = []
     exclude_entry_level: bool = False
     qa_title_fallback: bool = False
     allow_unknown_remote_location: bool = False
@@ -92,6 +93,11 @@ class SearchSpec(StrictInput):
     @classmethod
     def modes(cls, values):
         return list(dict.fromkeys(values))
+
+    @field_validator("working_languages")
+    @classmethod
+    def languages(cls, values):
+        return sorted(set(values))
 
     def runtime(self):
         data = self.model_dump()

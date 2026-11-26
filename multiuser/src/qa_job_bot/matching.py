@@ -4,6 +4,7 @@ import re
 from dataclasses import replace
 
 from qa_job_bot.config import EUROPE_CIS_LOCATION_TERMS, SearchProfile
+from qa_job_bot.job_language import working_languages
 from qa_job_bot.models import Job, MatchResult
 
 REMOTE_WORDS = (
@@ -412,6 +413,11 @@ def match_job(job: Job, profile: SearchProfile) -> MatchResult:
         reasons.append("remote, географию стоит проверить")
     else:
         return MatchResult(False, score, reasons + ["география неясна"], location_status)
+
+    if profile.working_languages and working_languages(job.description, job.company).isdisjoint(
+        profile.working_languages
+    ):
+        return MatchResult(False, score, reasons + ["язык вакансии не подходит"], location_status)
 
     seniority = _contains(title, profile.preferred_seniority)
     if seniority:

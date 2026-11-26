@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { Task } from "../src/types";
 import { expectReadableColors } from "./visual-accessibility";
-import { expectLayoutIntegrity } from "./layout-integrity";
+import { expectLayoutIntegrity, expectSearchResultsOrder } from "./layout-integrity";
 
 const origin = "http://127.0.0.1:8014";
 const password = "accounts-synthetic-password";
@@ -952,6 +952,69 @@ async function launchSearch(page: Page, wait = true) {
   return task.id as string;
 }
 
+test("working language choices persist and filter searches by declared or inferred language", async ({
+  page,
+  browser,
+}) => {
+  await signIn(page);
+  const invitation = await invite(page, "working-languages");
+  const context = await browser.newContext();
+  try {
+    const member = await context.newPage();
+    await accept(member, invitation.token);
+    await configureSearch(member, "working-languages");
+    const jobCards = member.getByRole("article");
+    const russian = member.getByRole("checkbox", { name: "Русскоязычные" });
+    const english = member.getByRole("checkbox", { name: "Англоязычные" });
+    const openCriteria = () => member.getByRole("button", { name: "Поиск и источники" }).click();
+    const search = async () => {
+      await launchSearch(member);
+      await member.getByRole("button", { name: /Показать свежую выдачу/ }).click();
+    };
+    const save = async () => {
+      await member.getByRole("button", { name: "Сохранить профиль поиска" }).click();
+      await expect(member.getByText("Профиль поиска сохранён.")).toBeVisible();
+    };
+    const showMatches = async (labels: string[]) => {
+      await expect(jobCards).toHaveCount(labels.length);
+      for (const label of labels) {
+        await expect(member.getByRole("article", {
+          name: `Backend Engineer · ${label}`,
+          exact: true,
+        })).toBeVisible();
+      }
+    };
+    await search();
+    await expect(jobCards).toHaveCount(9);
+    await expect(member.getByText("Компания из России", { exact: true })).toHaveCount(2);
+    await openCriteria();
+    await russian.check();
+    await save();
+    await member.reload();
+    await openCriteria();
+    await expect(russian).toBeChecked();
+    await expect(english).not.toBeChecked();
+    await member.getByText("История версий профиля", { exact: true }).click();
+    await member.getByText("Версия 2 · используется в поиске", { exact: true }).click();
+    await expect(member.locator(".profile-versions").getByText("Русскоязычные", { exact: true })).toBeVisible();
+    await member.getByRole("button", { name: /Вакансии/ }).first().click();
+    await search();
+    await showMatches(["Russian post", "Russian team", "Bilingual team", "Russian company"]);
+    await expect(member.getByText("Компания из России", { exact: true })).toHaveCount(1);
+
+    await openCriteria();
+    await russian.uncheck();
+    await english.check();
+    await save();
+    await member.getByRole("button", { name: /Вакансии/ }).first().click();
+    await search();
+    await showMatches(["English post", "English team", "Bilingual team", "English at Russian company", "Russian customers"]);
+    await expect(member.getByText("Компания из России", { exact: true })).toHaveCount(1);
+  } finally {
+    await context.close();
+  }
+});
+
 test("personal schedules and administrator quotas persist while exhausted quotas block document calls", async ({
   page,
   browser,
@@ -1089,11 +1152,7 @@ test("frozen pages, partial source failures, missing feeds and personal run hist
       "aria-busy",
       "false",
     );
-    const pagination = await member.getByRole("navigation", { name: "Пагинация вакансий" }).boundingBox();
-    const history = await member.locator(".search-history").boundingBox();
-    const sources = await member.getByRole("region", { name: "Результат поискового запуска" }).boundingBox();
-    expect(history!.y).toBeGreaterThanOrEqual(pagination!.y + pagination!.height);
-    expect(sources!.y).toBeGreaterThanOrEqual(history!.y + history!.height);
+    await expectSearchResultsOrder(member, true);
     await member
       .getByRole("button", { name: "Страница 2", exact: true })
       .click();
@@ -1694,16 +1753,7 @@ test("layout stays aligned across workspace pages and viewport sizes", async ({ 
           await contained(member);
         }
         if (image === "jobs") {
-          const results = await member.locator(".job-list").boundingBox();
-          const history = await member.locator(".search-history").boundingBox();
-          const summary = await member.locator(".search-run-summary").boundingBox();
-          expect(history!.y).toBeGreaterThanOrEqual(results!.y + results!.height);
-          expect(summary!.y).toBeGreaterThanOrEqual(history!.y + history!.height);
-          const pagination = member.getByRole("navigation", { name: "Пагинация вакансий" });
-          if (await pagination.count()) {
-            const bounds = await pagination.boundingBox();
-            expect(history!.y).toBeGreaterThanOrEqual(bounds!.y + bounds!.height);
-          }
+          await expectSearchResultsOrder(member);
           const popupWait = member.waitForEvent("popup");
           await member.getByRole("link", { name: "Перейти на страницу вакансии" }).click();
           await (await popupWait).close();

@@ -259,6 +259,36 @@ test("presets require explicit application and load a versioned saved profile", 
   expect(within(current.closest("details")!).getByText("brand designer")).toBeVisible();
 });
 
+test("working language choices save together and can be cleared", async () => {
+  const api = preferencesServer({
+    search_profile: { configured: true, version: 1, profile: examples.developer },
+  });
+  const user = userEvent.setup();
+  const { unmount } = render(<SearchSettings />);
+  await ready();
+  const russian = () => screen.getByRole("checkbox", { name: "Русскоязычные" });
+  const english = () => screen.getByRole("checkbox", { name: "Англоязычные" });
+  const save = () => user.click(screen.getByRole("button", { name: "Сохранить профиль поиска" }));
+  expect(russian()).not.toBeChecked();
+  expect(english()).not.toBeChecked();
+  await user.click(russian());
+  await user.click(english());
+  await save();
+  await screen.findByText("Профиль поиска сохранён.");
+  expect(api.state.search_profile.profile?.working_languages).toEqual(["ru", "en"]);
+
+  unmount();
+  render(<SearchSettings />);
+  await ready();
+  expect(russian()).toBeChecked();
+  expect(english()).toBeChecked();
+  await user.click(russian());
+  await user.click(english());
+  await save();
+  await screen.findByText("Профиль поиска сохранён.");
+  expect(api.state.search_profile.profile?.working_languages).toEqual([]);
+});
+
 test("new accounts have an empty profile history", async () => {
   const api = preferencesServer();
   render(<SearchSettings />);

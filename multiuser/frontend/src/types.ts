@@ -71,6 +71,7 @@ export type Job = {
   needs_refresh?: boolean;
   title: string;
   company: string;
+  russian_company?: boolean;
   location: string;
   url: string;
   description: string;

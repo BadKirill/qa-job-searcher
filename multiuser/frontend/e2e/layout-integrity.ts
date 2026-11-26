@@ -1,5 +1,30 @@
 import { expect, test, type Page } from "@playwright/test";
 
+export async function expectSearchResultsOrder(page: Page, requiresPagination = false) {
+  await expect(page.locator(".job-list")).toBeVisible();
+  await expect(page.locator(".search-history")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Результат поискового запуска" })).toBeVisible();
+  if (requiresPagination) {
+    await expect(page.getByRole("navigation", { name: "Пагинация вакансий" })).toBeVisible();
+  }
+  const { jobs, pagination, history, sources } = await page.evaluate(() => {
+    function bounds(selector: string) {
+      const rect = document.querySelector(selector)?.getBoundingClientRect();
+      return rect ? { top: rect.top, bottom: rect.bottom } : null;
+    }
+    return {
+      jobs: bounds(".job-list"),
+      pagination: bounds(".pagination"),
+      history: bounds(".search-history"),
+      sources: bounds(".search-run-summary"),
+    };
+  });
+  if (requiresPagination) expect(pagination).not.toBeNull();
+  if (pagination) expect(pagination.top).toBeGreaterThanOrEqual(jobs!.bottom);
+  expect(history!.top).toBeGreaterThanOrEqual((pagination ?? jobs)!.bottom);
+  expect(sources!.top).toBeGreaterThanOrEqual(history!.bottom);
+}
+
 export async function expectLayoutIntegrity(page: Page) {
   const failures = await page.evaluate(() => {
     const failures: { rule: string; element: string; detail: string }[] = [];

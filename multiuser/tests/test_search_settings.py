@@ -58,12 +58,15 @@ def test_search_spec_is_explicit_and_normalized():
     profile = SearchSpec(
         role_keywords=["  Ｂackend Engineer ", "backend engineer"],
         workplace_types=["hybrid", "hybrid"],
+        working_languages=["ru", "ru"],
     )
     assert profile.role_keywords == ["backend engineer"]
     assert profile.workplace_types == ["hybrid"]
     runtime = profile.runtime()
     assert not runtime.exclude_entry_level and not runtime.qa_title_fallback
     assert runtime.excluded_title_keywords == () and runtime.allowed_locations == ()
+    assert runtime.working_languages == ("ru",)
+    assert spec(working_languages=["ru", "en"]).working_languages == ["en", "ru"]
     for changes in (
         {"role_keywords": []},
         {"role_keywords": "backend"},
@@ -72,6 +75,9 @@ def test_search_spec_is_explicit_and_normalized():
         {"min_score": 101},
         {"workplace_types": []},
         {"workplace_types": ["office"]},
+        {"working_languages": ["de"]},
+        {"working_languages": "ru"},
+        {"working_languages": ["ru", "en", "en"]},
         {"extra": "x"},
     ):
         with pytest.raises(ValidationError):
@@ -327,6 +333,8 @@ def test_parallel_profile_and_source_edits_have_one_winner(pg_store):
 
 
 def test_imported_settings_remain_editable_with_original_history(pg_store):
+    original_profile = asdict(SearchProfile())
+    del original_profile["working_languages"]
     with pg_store.write() as connection:
         connection.execute(
             s.search_profiles.insert().values(
@@ -334,7 +342,7 @@ def test_imported_settings_remain_editable_with_original_history(pg_store):
                 user_id=pg_store.user_id,
                 version=1,
                 active=True,
-                payload=asdict(SearchProfile()),
+                payload=original_profile,
             )
         )
         connection.execute(s.source_definitions.insert().values(kind="lever", payload={}))
@@ -348,12 +356,15 @@ def test_imported_settings_remain_editable_with_original_history(pg_store):
                 payload={"kind": "lever", "name": "Old", "token": "old", "tags": []},
             )
         )
-    assert pg_store.preferences()["search_profile"]["profile"]["qa_title_fallback"]
+    active_profile = pg_store.preferences()["search_profile"]["profile"]
+    assert active_profile["qa_title_fallback"] and active_profile["working_languages"] == []
     assert len(pg_store.source_history("old-source")) == 1
     pg_store.update_source("old-source", 1, enabled=False)
     assert len(pg_store.source_history("old-source")) == 2
     pg_store.save_search_profile(spec(), 1)
-    assert pg_store.search_profile_history()[0]["profile"]["matching_mode"] == "legacy"
+    history = pg_store.search_profile_history()
+    assert history[0]["profile"]["matching_mode"] == "legacy"
+    assert "working_languages" not in history[0]["profile"]
 
 
 def test_preferences_api_isolated_and_validated(api_world):
@@ -417,6 +428,31 @@ def test_preferences_api_isolated_and_validated(api_world):
     assert other.get("/api/search-settings").json()["search_profile"]["version"] == 2
     assert other.request("DELETE", path, json={"expected_version": 2}).status_code == 204
     assert other.get(path + "/history").json()["items"][-1]["deleted"]
+
+
+def test_working_language_profile_api_defaults_validates_and_versions(api_world):
+    admin, member, _, _, _ = api_world
+    path = "/api/search-profile"
+    previous_profile = {"role_keywords": ["backend engineer"]}
+    first = member.put(path, json={"expected_version": 0, "profile": previous_profile})
+    assert first.status_code == 200 and first.json()["profile"]["working_languages"] == []
+
+    def revise(languages):
+        return member.put(
+            path,
+            json={
+                "expected_version": 1,
+                "profile": {**previous_profile, "working_languages": languages},
+            },
+        )
+
+    assert revise(["fr"]).status_code == 422
+    saved = revise(["ru", "en"])
+    assert saved.status_code == 200
+    assert member.get(path).json()["profile"]["working_languages"] == ["en", "ru"]
+    assert admin.get(path).json()["profile"] is None
+    history = member.get(path + "/history").json()["items"]
+    assert [item["profile"]["working_languages"] for item in history] == [[], ["en", "ru"]]
 
 
 def test_source_check_api_never_publishes_and_marks_concurrent_edits_stale(api_world):
