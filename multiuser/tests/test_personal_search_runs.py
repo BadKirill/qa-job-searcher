@@ -126,6 +126,30 @@ def test_two_users_have_independent_scores_cards_errors_revisions_and_states(pg_
         assert error.value.status == 404
 
 
+def test_working_language_filters_fresh_and_retained_jobs_with_saved_profile(pg_store):
+    configure(pg_store)
+    russian = job(1, description="Our working language is Russian.")
+    english = job(2, description="Рабочий язык в команде — английский.")
+    unknown = job(3, description="Python, SQL")
+    first = complete(pg_store, [russian, english, unknown])
+    assert pg_store.list_jobs("active", 1)["total"] == 3
+
+    roles = {"role_keywords": ["backend engineer"]}
+    pg_store.save_search_profile(SearchSpec(**roles, working_languages=["ru"]), 1)
+    complete(pg_store, error="http_error")
+    items = pg_store.list_jobs("active", 1)["items"]
+    assert [(row["description"], row["freshness"]) for row in items] == [
+        (russian.description, "retained")
+    ]
+
+    pg_store.save_search_profile(SearchSpec(**roles, working_languages=["en", "ru"]), 2)
+    complete(pg_store, [russian, english, unknown])
+    items = pg_store.list_jobs("active", 1)["items"]
+    assert {row["description"] for row in items} == {russian.description, english.description}
+    assert all(row["score"] == 60 for row in items)
+    assert pg_store.list_jobs("active", 1, run_id=first)["total"] == 3
+
+
 def test_inputs_are_pinned_at_enqueue_deduplicated_and_new_settings_allow_new_run(pg_store):
     source = configure(pg_store)
     queued = pg_store.enqueue_search("same-request")

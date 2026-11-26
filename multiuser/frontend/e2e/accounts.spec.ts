@@ -952,6 +952,66 @@ async function launchSearch(page: Page, wait = true) {
   return task.id as string;
 }
 
+test("working language choices persist and filter searches by declared or inferred language", async ({
+  page,
+  browser,
+}) => {
+  await signIn(page);
+  const invitation = await invite(page, "working-languages");
+  const context = await browser.newContext();
+  try {
+    const member = await context.newPage();
+    await accept(member, invitation.token);
+    await configureSearch(member, "working-languages");
+    const jobCards = member.getByRole("article");
+    const russian = member.getByRole("checkbox", { name: "Русскоязычные" });
+    const english = member.getByRole("checkbox", { name: "Англоязычные" });
+    const openCriteria = () => member.getByRole("button", { name: "Поиск и источники" }).click();
+    const search = async () => {
+      await launchSearch(member);
+      await member.getByRole("button", { name: /Показать свежую выдачу/ }).click();
+    };
+    const save = async () => {
+      await member.getByRole("button", { name: "Сохранить профиль поиска" }).click();
+      await expect(member.getByText("Профиль поиска сохранён.")).toBeVisible();
+    };
+    const showMatches = async (labels: string[]) => {
+      await expect(jobCards).toHaveCount(labels.length);
+      for (const label of labels) {
+        await expect(member.getByRole("article", {
+          name: `Backend Engineer · ${label}`,
+          exact: true,
+        })).toBeVisible();
+      }
+    };
+    await search();
+    await expect(jobCards).toHaveCount(6);
+    await openCriteria();
+    await russian.check();
+    await save();
+    await member.reload();
+    await openCriteria();
+    await expect(russian).toBeChecked();
+    await expect(english).not.toBeChecked();
+    await member.getByText("История версий профиля", { exact: true }).click();
+    await member.getByText("Версия 2 · используется в поиске", { exact: true }).click();
+    await expect(member.locator(".profile-versions").getByText("Русскоязычные", { exact: true })).toBeVisible();
+    await member.getByRole("button", { name: /Вакансии/ }).first().click();
+    await search();
+    await showMatches(["Russian post", "Russian team", "Bilingual team"]);
+
+    await openCriteria();
+    await russian.uncheck();
+    await english.check();
+    await save();
+    await member.getByRole("button", { name: /Вакансии/ }).first().click();
+    await search();
+    await showMatches(["English post", "English team", "Bilingual team"]);
+  } finally {
+    await context.close();
+  }
+});
+
 test("personal schedules and administrator quotas persist while exhausted quotas block document calls", async ({
   page,
   browser,

@@ -292,6 +292,29 @@ def fixture_source_client(include_qa=False, **kwargs):
                 },
             )
         if "lever.co" in host:
+            if token == "working-languages":
+                descriptions = {
+                    "Russian post": "Ищем инженера для тестирования и развития нашего продукта.",
+                    "English post": "We are hiring an engineer to improve our software products.",
+                    "Russian team": "Help us build software. Working language: Russian.",
+                    "English team": "Ищем инженера в команду. Рабочий язык — английский.",
+                    "Bilingual team": "Working languages: English and Russian.",
+                    "Unknown language": "Python, SQL",
+                }
+                return httpx.Response(
+                    200,
+                    json=[
+                        {
+                            "id": str(index),
+                            "text": f"Backend Engineer · {label}",
+                            "categories": {"location": "Worldwide"},
+                            "workplaceType": "remote",
+                            "hostedUrl": f"https://example.com/{token}/{index}",
+                            "descriptionPlain": description,
+                        }
+                        for index, (label, description) in enumerate(descriptions.items())
+                    ],
+                )
             return httpx.Response(
                 200,
                 json=[

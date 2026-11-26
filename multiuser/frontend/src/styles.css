@@ -2451,6 +2451,11 @@ small {
 .profile-versions dd {
   margin: 0;
 }
+.working-language-choices {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
 .search-settings .checkbox-row,
 .account-settings label:has(> input[type="checkbox"]),
 .runtime-settings label:has(> input[type="checkbox"]) {

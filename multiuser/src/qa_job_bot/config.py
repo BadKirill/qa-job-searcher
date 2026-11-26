@@ -121,6 +121,7 @@ class SearchProfile:
     candidate_locations: tuple[str, ...] = ()
     hybrid_locations: tuple[str, ...] = ()
     workplace_types: tuple[str, ...] = ()
+    working_languages: tuple[str, ...] = ()
     exclude_entry_level: bool = True
     qa_title_fallback: bool = True
     role_keywords: tuple[str, ...] = DEFAULT_ROLE_KEYWORDS

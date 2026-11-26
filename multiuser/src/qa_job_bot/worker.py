@@ -9,7 +9,7 @@ from contextlib import suppress
 from pathlib import Path
 from uuid import uuid4
 
-from langdetect import DetectorFactory, LangDetectException, detect_langs
+from langdetect import LangDetectException, detect_langs
 
 from qa_job_bot.agent_gateway import AgentGateway, AgentUnavailable
 from qa_job_bot.agent_result import response_metadata
@@ -35,7 +35,6 @@ from qa_job_bot.web_security import WebSettings
 from qa_job_bot.web_store import StoreError, WebStore
 
 logger = logging.getLogger(__name__)
-DetectorFactory.seed = 0
 
 
 def bound_metadata(response, context, role):

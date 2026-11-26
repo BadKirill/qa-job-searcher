@@ -21,6 +21,7 @@ export type SearchSpec = {
   candidate_locations: string[];
   hybrid_locations: string[];
   workplace_types: string[];
+  working_languages: ("ru" | "en")[];
   exclude_entry_level: boolean;
   qa_title_fallback: boolean;
   allow_unknown_remote_location: boolean;
@@ -64,6 +65,10 @@ const workplace = [
   ["hybrid", "Гибрид", "часть времени в офисе"],
   ["on-site", "В офисе", "работа на месте"],
 ] as const;
+const workingLanguages = [
+  ["ru", "Русскоязычные"],
+  ["en", "Англоязычные"],
+] as const;
 const flags = [
   ["exclude_entry_level", "Исключать Junior и стажировки", "пропускать вакансии начального уровня"],
   ["qa_title_fallback", "Учитывать дополнительные QA-названия", "искать также по встроенному списку QA-ролей"],
@@ -86,6 +91,7 @@ export const emptySearch: SearchSpec = {
   candidate_locations: [],
   hybrid_locations: [],
   workplace_types: ["remote"],
+  working_languages: [],
   exclude_entry_level: false,
   qa_title_fallback: false,
   allow_unknown_remote_location: false,
@@ -245,6 +251,15 @@ function ProfileHistory() {
                     .map(([, label]) => label)
                     .join(", ") ||
                     (profile.require_remote ? "Удалённо или допустимый гибрид" : "Любой")}
+                </dd>
+              </div>
+              <div>
+                <dt>Рабочий язык</dt>
+                <dd>
+                  {workingLanguages
+                    .filter(([language]) => profile.working_languages?.includes(language))
+                    .map(([, label]) => label)
+                    .join(", ") || "Любой"}
                 </dd>
               </div>
               {flags.map(([field, label]) => (
@@ -577,6 +592,28 @@ export function SearchSettings({
                       }
                     />
                   ))}
+                  <p className="muted" id={`${historyId}-language`}>
+                    Рабочий язык <small className="field-hint">(без выбора — любой)</small>
+                  </p>
+                  <div className="working-language-choices" role="group" aria-labelledby={`${historyId}-language`}>
+                    {workingLanguages.map(([language, label]) => (
+                      <label className="checkbox-row" key={language}>
+                        <input
+                          type="checkbox"
+                          checked={form.working_languages.includes(language)}
+                          onChange={(event) =>
+                            setForm({
+                              ...form,
+                              working_languages: event.target.checked
+                                ? [...form.working_languages, language]
+                                : form.working_languages.filter((value) => value !== language),
+                            })
+                          }
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
                   {flags
                     .filter(
                       ([field]) =>
