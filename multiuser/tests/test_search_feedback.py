@@ -19,7 +19,7 @@ from qa_job_bot.posting_details import PublicPostingSearch, fetch_posting, same_
 from qa_job_bot.posting_summary import posting_summary
 from qa_job_bot.search_models import SearchSpec
 from qa_job_bot.source_http import SourceClient
-from qa_job_bot.source_import import csv_rows, sheets_csv
+from qa_job_bot.source_import import csv_rows, sheets_csv, sheets_download_host
 from qa_job_bot.source_links import posting_link, source_link
 from qa_job_bot.web_store import StoreError
 from qa_job_bot.work_time import display_work_time
@@ -337,6 +337,19 @@ async def test_spreadsheet_export_restricts_redirects(status):
 
 
 @pytest.mark.parametrize(
+    ("host", "allowed"),
+    [
+        ("doc-a1-b2-sheets.googleusercontent.com", True),
+        ("doc--sheets.googleusercontent.com", False),
+        ("doc-a.b-sheets.googleusercontent.com", False),
+        ("doc-" * 256 + "sheets.googleusercontent.com.invalid.test", False),
+    ],
+)
+def test_spreadsheet_download_hostname(host, allowed):
+    assert sheets_download_host(host) is allowed
+
+
+@pytest.mark.parametrize(
     "status,expected",
     [
         (200, "open"),
@@ -464,10 +477,11 @@ async def test_web_search_uses_only_public_fields_and_url_annotations():
         )
 
     search = PublicPostingSearch(settings, transport=httpx.MockTransport(handler))
-    assert await search.find(
+    links = await search.find(
         {"title": "Example job", "description": "SECRET"},
         lambda event, data: events.append((event, data)),
-    ) == [ORIGINAL]
+    )
+    assert links == [ORIGINAL]
     assert [event for event, _ in events] == ["sent", "usage"]
 
 

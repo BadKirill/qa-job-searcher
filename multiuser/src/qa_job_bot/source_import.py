@@ -1,6 +1,7 @@
 import csv
 import io
 import re
+from string import ascii_lowercase, digits
 from urllib.parse import urljoin, urlsplit
 
 import httpx
@@ -12,6 +13,7 @@ from qa_job_bot.web_store import StoreError
 
 MAX_CSV_BYTES = 256 * 1024
 MAX_ROWS = 100
+SHEETS_DOWNLOAD_LABEL_CHARS = frozenset(ascii_lowercase + digits + "-")
 
 
 def link_spec(value, name="", tags=()):
@@ -84,9 +86,13 @@ def preview_row(values, number, company, link, tags, identities):
 
 
 def sheets_download_host(host):
-    return host == "docs.google.com" or bool(
-        re.fullmatch(r"doc-[a-z0-9-]+-sheets\.googleusercontent\.com", host)
-    )
+    if host == "docs.google.com":
+        return True
+    prefix, suffix = "doc-", "-sheets.googleusercontent.com"
+    if not host.startswith(prefix) or not host.endswith(suffix):
+        return False
+    label = host[len(prefix) : -len(suffix)]
+    return bool(label) and SHEETS_DOWNLOAD_LABEL_CHARS.issuperset(label)
 
 
 async def sheets_csv(value, factory=SourceClient):
