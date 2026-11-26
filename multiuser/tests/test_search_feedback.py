@@ -412,9 +412,7 @@ async def test_ats_contracts_keep_declared_and_unconfirmed_states_separate(statu
         }
         assert same_posting(public_job, result.job)
         assert not same_posting({**public_job, "description": "Engineering position."}, result.job)
-        assert not same_posting(
-            {**public_job, "url": ORIGINAL.replace("/123", "/456")}, result.job
-        )
+        assert not same_posting({**public_job, "url": ORIGINAL.replace("/123", "/456")}, result.job)
 
 
 def test_manual_add_preserves_owner_context_url_deduplication_and_revisions(api_world):

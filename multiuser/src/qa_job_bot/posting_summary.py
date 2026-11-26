@@ -32,7 +32,8 @@ SIZE = re.compile(
     re.I,
 )
 FOUNDED = re.compile(
-    r"\b(?:founded in|основан[аоы]? в)\s+((?:18|19|20)\d{2})\b", re.I,
+    r"\b(?:founded in|основан[аоы]? в)\s+((?:18|19|20)\d{2})\b",
+    re.I,
 )
 COMPANY_HEADING = re.compile(r"^(?:about (?:us|the company)|о компании)\s*[:：]?$", re.I)
 ROLE_HEADING = re.compile(r"^(?:about the role|role focus|о роли|фокус роли)\s*[:：]?$", re.I)
