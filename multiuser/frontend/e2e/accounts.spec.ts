@@ -131,6 +131,11 @@ test("a saved design example survives reload and previous criteria remain visibl
     const openCriteria = () => member.getByRole("button", { name: "Настроить критерии" }).click();
     await openCriteria();
     const examples = member.getByLabel("Пример профиля", { exact: true });
+    const historyTitle = member.getByText("История версий профиля", { exact: true });
+    const history = member.locator(".profile-history > summary");
+    await expect(history).toBeInViewport();
+    await expect(historyTitle).toHaveCSS("font-size", "20px");
+    await expect(history).toHaveAccessibleDescription("Здесь появятся ваши сохранённые критерии");
     await expect(examples).toHaveValue("");
     await examples.selectOption("designer");
     await member.getByRole("button", { name: "Применить пример" }).click();
@@ -179,12 +184,15 @@ test("a saved design example survives reload and previous criteria remain visibl
     await member.getByRole("button", { name: "Сохранить профиль поиска" }).click();
     await expect(member.getByText("Профиль поиска сохранён.")).toBeVisible();
     await expect(examples).toHaveValue("");
-    await member.getByText("История версий профиля", { exact: true }).click();
+    await expect(history).toHaveAccessibleDescription("В поиске используется версия 2");
+    await history.focus();
+    await member.keyboard.press("Enter");
     await member.getByText("Версия 1", { exact: true }).click();
     await expect(member.getByText("product designer, ux designer", { exact: true })).toBeVisible();
     await member.getByText("Версия 2 · используется в поиске", { exact: true }).click();
     await expect(member.getByText("brand designer", { exact: true })).toBeVisible();
     await member.getByRole("button", { name: "Источники", exact: true }).click();
+    await expect(history).toHaveCount(0);
     await expect(member.getByRole("option", { name: "Remotive · уже подключён" })).toBeDisabled();
     await expect(member.getByRole("button", { name: "Добавить источник", exact: true })).toBeDisabled();
   } finally {
