@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { Task } from "../src/types";
 import { expectReadableColors } from "./visual-accessibility";
-import { expectLayoutIntegrity } from "./layout-integrity";
+import { expectLayoutIntegrity, expectSearchResultsOrder } from "./layout-integrity";
 
 const origin = "http://127.0.0.1:8014";
 const password = "accounts-synthetic-password";
@@ -1152,11 +1152,7 @@ test("frozen pages, partial source failures, missing feeds and personal run hist
       "aria-busy",
       "false",
     );
-    const pagination = await member.getByRole("navigation", { name: "Пагинация вакансий" }).boundingBox();
-    const history = await member.locator(".search-history").boundingBox();
-    const sources = await member.getByRole("region", { name: "Результат поискового запуска" }).boundingBox();
-    expect(history!.y).toBeGreaterThanOrEqual(pagination!.y + pagination!.height);
-    expect(sources!.y).toBeGreaterThanOrEqual(history!.y + history!.height);
+    await expectSearchResultsOrder(member, true);
     await member
       .getByRole("button", { name: "Страница 2", exact: true })
       .click();
@@ -1757,16 +1753,7 @@ test("layout stays aligned across workspace pages and viewport sizes", async ({ 
           await contained(member);
         }
         if (image === "jobs") {
-          const results = await member.locator(".job-list").boundingBox();
-          const history = await member.locator(".search-history").boundingBox();
-          const summary = await member.locator(".search-run-summary").boundingBox();
-          expect(history!.y).toBeGreaterThanOrEqual(results!.y + results!.height);
-          expect(summary!.y).toBeGreaterThanOrEqual(history!.y + history!.height);
-          const pagination = member.getByRole("navigation", { name: "Пагинация вакансий" });
-          if (await pagination.count()) {
-            const bounds = await pagination.boundingBox();
-            expect(history!.y).toBeGreaterThanOrEqual(bounds!.y + bounds!.height);
-          }
+          await expectSearchResultsOrder(member);
           const popupWait = member.waitForEvent("popup");
           await member.getByRole("link", { name: "Перейти на страницу вакансии" }).click();
           await (await popupWait).close();
