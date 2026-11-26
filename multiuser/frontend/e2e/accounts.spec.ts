@@ -985,7 +985,8 @@ test("working language choices persist and filter searches by declared or inferr
       }
     };
     await search();
-    await expect(jobCards).toHaveCount(6);
+    await expect(jobCards).toHaveCount(9);
+    await expect(member.getByText("Компания из России", { exact: true })).toHaveCount(2);
     await openCriteria();
     await russian.check();
     await save();
@@ -998,7 +999,8 @@ test("working language choices persist and filter searches by declared or inferr
     await expect(member.locator(".profile-versions").getByText("Русскоязычные", { exact: true })).toBeVisible();
     await member.getByRole("button", { name: /Вакансии/ }).first().click();
     await search();
-    await showMatches(["Russian post", "Russian team", "Bilingual team"]);
+    await showMatches(["Russian post", "Russian team", "Bilingual team", "Russian company"]);
+    await expect(member.getByText("Компания из России", { exact: true })).toHaveCount(1);
 
     await openCriteria();
     await russian.uncheck();
@@ -1006,7 +1008,8 @@ test("working language choices persist and filter searches by declared or inferr
     await save();
     await member.getByRole("button", { name: /Вакансии/ }).first().click();
     await search();
-    await showMatches(["English post", "English team", "Bilingual team"]);
+    await showMatches(["English post", "English team", "Bilingual team", "English at Russian company", "Russian customers"]);
+    await expect(member.getByText("Компания из России", { exact: true })).toHaveCount(1);
   } finally {
     await context.close();
   }

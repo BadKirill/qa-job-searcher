@@ -146,6 +146,7 @@ export function JobCard({
           <div className="company-details">
             <span>{job.company || "Компания не указана"}</span>
             {job.location && <span className="job-location">{job.location}</span>}
+            {job.russian_company && <span className="job-location">Компания из России</span>}
           </div>
         </div>
         {job.applied_at && (

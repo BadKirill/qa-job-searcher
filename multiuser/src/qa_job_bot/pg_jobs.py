@@ -10,6 +10,7 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.dialects.postgresql import insert
 
 from qa_job_bot import pg_schema as s
+from qa_job_bot.company_origin import is_russian_company
 from qa_job_bot.job_details import extract_details
 from qa_job_bot.models import canonical_text, utcnow
 from qa_job_bot.pg_access import OwnedRepository, upsert
@@ -192,6 +193,7 @@ class PersonalJobs(OwnedRepository):
             "source_status": card.get("source"),
             "applied_at": row["applied_at"],
             "archived_at": row["archived_at"],
+            "russian_company": is_russian_company(job.get("description", ""), job["company"]),
             "details": extract_details(job.get("description", ""), job["title"]),
             "documents": self.task_list(connection, row["id"]),
         }

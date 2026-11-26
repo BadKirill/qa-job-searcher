@@ -2,6 +2,8 @@ import re
 
 from langdetect import DetectorFactory, LangDetectException, detect_langs
 
+from qa_job_bot.company_origin import is_russian_company
+
 DetectorFactory.seed = 0
 
 ENGLISH = r"english|английск\w*"
@@ -39,7 +41,7 @@ SPEAKING_TEAM = re.compile(
 )
 
 
-def working_languages(description: str) -> set[str]:
+def working_languages(description: str, company: str = "") -> set[str]:
     text = description[:20000].strip()
     normalized = text.casefold()
     declarations = WORK_LANGUAGE.findall(normalized) or SPEAKING_TEAM.findall(normalized)
@@ -53,6 +55,8 @@ def working_languages(description: str) -> set[str]:
             )
             if name.search(evidence) or adjective in evidence
         }
+    if is_russian_company(text, company):
+        return {"ru"}
     if len(text) < 40:
         return set()
     try:

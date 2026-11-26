@@ -131,23 +131,30 @@ def test_working_language_filters_fresh_and_retained_jobs_with_saved_profile(pg_
     russian = job(1, description="Our working language is Russian.")
     english = job(2, description="Рабочий язык в команде — английский.")
     unknown = job(3, description="Python, SQL")
-    first = complete(pg_store, [russian, english, unknown])
-    assert pg_store.list_jobs("active", 1)["total"] == 3
+    russian_company = job(4, description="Our company was founded in Russia.")
+    jobs = [russian, english, unknown, russian_company]
+    first = complete(pg_store, jobs)
+    assert pg_store.list_jobs("active", 1)["total"] == 4
 
     roles = {"role_keywords": ["backend engineer"]}
     pg_store.save_search_profile(SearchSpec(**roles, working_languages=["ru"]), 1)
     complete(pg_store, error="http_error")
     items = pg_store.list_jobs("active", 1)["items"]
-    assert [(row["description"], row["freshness"]) for row in items] == [
-        (russian.description, "retained")
-    ]
+    assert {(row["description"], row["freshness"], row["russian_company"]) for row in items} == {
+        (russian.description, "retained", False),
+        (russian_company.description, "retained", True),
+    }
 
     pg_store.save_search_profile(SearchSpec(**roles, working_languages=["en", "ru"]), 2)
-    complete(pg_store, [russian, english, unknown])
+    complete(pg_store, jobs)
     items = pg_store.list_jobs("active", 1)["items"]
-    assert {row["description"] for row in items} == {russian.description, english.description}
+    assert {row["description"] for row in items} == {
+        russian.description,
+        english.description,
+        russian_company.description,
+    }
     assert all(row["score"] == 60 for row in items)
-    assert pg_store.list_jobs("active", 1, run_id=first)["total"] == 3
+    assert pg_store.list_jobs("active", 1, run_id=first)["total"] == 4
 
 
 def test_inputs_are_pinned_at_enqueue_deduplicated_and_new_settings_allow_new_run(pg_store):

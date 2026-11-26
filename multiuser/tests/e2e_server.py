@@ -300,6 +300,11 @@ def fixture_source_client(include_qa=False, **kwargs):
                     "English team": "Ищем инженера в команду. Рабочий язык — английский.",
                     "Bilingual team": "Working languages: English and Russian.",
                     "Unknown language": "Python, SQL",
+                    "Russian company": "Our company was founded in Russia. We build software.",
+                    "English at Russian company": (
+                        "We are a Russian technology company. Working language: English."
+                    ),
+                    "Russian customers": "We build products for customers in Russia and Europe.",
                 }
                 return httpx.Response(
                     200,

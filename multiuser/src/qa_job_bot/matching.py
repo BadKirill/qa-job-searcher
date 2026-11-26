@@ -414,7 +414,7 @@ def match_job(job: Job, profile: SearchProfile) -> MatchResult:
     else:
         return MatchResult(False, score, reasons + ["география неясна"], location_status)
 
-    if profile.working_languages and working_languages(job.description).isdisjoint(
+    if profile.working_languages and working_languages(job.description, job.company).isdisjoint(
         profile.working_languages
     ):
         return MatchResult(False, score, reasons + ["язык вакансии не подходит"], location_status)

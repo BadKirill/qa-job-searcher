@@ -31,6 +31,10 @@ FRENCH = "Nous recherchons un ingénieur pour tester le produit et améliorer no
         (f"{ENGLISH}\nWe are not a Russian-speaking team.", {"en"}),
         (f"{RUSSIAN}\nАнглийский B2 будет плюсом.", {"ru"}),
         (f"{ENGLISH}\nExperience testing Russian-language content is required.", {"en"}),
+        (f"{ENGLISH}\nWe are a Russian software company.", {"ru"}),
+        ("We are a Russian startup. Working language: English.", {"en"}),
+        ("Company founded in Russia. Join our English-speaking team.", {"en"}),
+        ("We are a Russian startup. Working language: French.", set()),
         ("", set()),
         ("Python · SQL · Java", set()),
         ("0123456789" * 5, set()),
@@ -38,6 +42,12 @@ FRENCH = "Nous recherchons un ingénieur pour tester le produit et améliorer no
 )
 def test_working_languages(description, expected):
     assert working_languages(description) == expected
+
+
+def test_working_languages_recognize_the_named_employer():
+    description = f"{ENGLISH} Acme was founded in Russia and now operates globally."
+    assert working_languages(description, "Acme") == {"ru"}
+    assert working_languages(description, "Another Employer") == {"en"}
 
 
 def test_text_detection_checks_confidence_and_bounds_input(monkeypatch):

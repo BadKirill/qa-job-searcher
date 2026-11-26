@@ -28,6 +28,7 @@ it("shows sparse vacancies honestly and renders external descriptions as text", 
   };
   const { rerender } = render(<JobCard job={job} {...props} />);
   expect(screen.getByText("Компания не указана")).toBeInTheDocument();
+  expect(screen.queryByText("Компания из России")).not.toBeInTheDocument();
   expect(screen.getByText("Рейтинг по фильтрам")).toBeInTheDocument();
   expect(screen.getByText("роль: qa engineer")).toBeInTheDocument();
   expect(screen.getByText("Ссылка недоступна")).toBeInTheDocument();
@@ -38,11 +39,12 @@ it("shows sparse vacancies honestly and renders external descriptions as text", 
   expect(screen.queryByText("Что понадобится")).not.toBeInTheDocument();
   rerender(
     <JobCard
-      job={{ ...job, description: "<img src=x onerror=steal()>" }}
+      job={{ ...job, company: "Example Company", russian_company: true, description: "<img src=x onerror=steal()>" }}
       {...props}
     />,
   );
   expect(screen.getByText("<img src=x onerror=steal()>")).toBeInTheDocument();
+  expect(screen.getByText("Компания из России")).toBeInTheDocument();
   expect(document.querySelector("img")).toBeNull();
 });
 
