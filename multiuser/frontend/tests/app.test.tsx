@@ -106,7 +106,7 @@ it("shows an API error without falsely applying a failed action and permits retr
   await userEvent.click(
     within(card).getByRole("button", { name: "Не подходит" }),
   );
-  await screen.findByText("Новые возможности впереди");
+  await screen.findByText("Подходящих вакансий пока нет");
 });
 
 it("removes the last item on page two and returns to the last existing page", async () => {
@@ -130,8 +130,9 @@ it("removes the last item on page two and returns to the last existing page", as
 it("handles empty search, starts a search and refreshes results while retaining search errors", async () => {
   const backend = server();
   backend.state.jobs = [];
+  backend.state.lastSearchAt = null;
   render(<App />);
-  await screen.findByText("Новые возможности впереди");
+  await screen.findByText("Начните поиск");
   backend.failures.push({
     path: "/search-runs",
     status: 503,
@@ -257,7 +258,7 @@ it("shows profile failures, retries and supports logout failure then success", a
   await userEvent.click(screen.getByRole("button", { name: "Выйти" }));
   await screen.findByText("Выход не выполнен");
   await userEvent.click(screen.getByRole("button", { name: "Выйти" }));
-  await screen.findByRole("heading", { name: "С возвращением" });
+  await screen.findByRole("heading", { name: "Вход в getCareer" });
   await userEvent.type(screen.getByLabelText("Пароль"), "correct-password");
   await userEvent.click(screen.getByRole("button", { name: "Войти" }));
   await screen.findByText(/11 вакансий/);
@@ -288,7 +289,7 @@ it("bootstraps a private workspace, rejects a failed login and expires an active
   await screen.findByText(/11 вакансий/);
   backend.state.session = { authenticated: false, setup_required: false };
   act(() => window.dispatchEvent(new Event("session-expired")));
-  await screen.findByRole("heading", { name: "С возвращением" });
+  await screen.findByRole("heading", { name: "Вход в getCareer" });
 });
 
 it("recovers from initial session failure", async () => {

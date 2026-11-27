@@ -388,6 +388,17 @@ class PersonalJobs(OwnedRepository):
                 for row in connection.execute(select(s.states).where(self.owned(s.states)))
             }
             last_search = self.setting(connection, "last_search_at")
+            schedule = (
+                connection.execute(
+                    select(s.search_schedules.c.enabled, s.search_schedules.c.next_run_at).where(
+                        self.owned(s.search_schedules)
+                    )
+                )
+                .mappings()
+                .first()
+                if tab == "active" and not run_id
+                else None
+            )
             checks = self.setting(connection, "posting_checks", {})
             inputs = (frozen.get("search_run") or {}).get("inputs", {})
             profile = self.profile_data(connection)
@@ -448,6 +459,7 @@ class PersonalJobs(OwnedRepository):
             "snapshot_id": snapshot_id,
             "snapshot_at": datetime.fromtimestamp(snapshot_at, UTC).isoformat(),
             "last_search_at": last_search,
+            "schedule": dict(schedule) if schedule else None,
         }
 
     @staticmethod

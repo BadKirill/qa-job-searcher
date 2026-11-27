@@ -143,9 +143,11 @@ export function SearchSources({
     element?.focus();
     element?.scrollIntoView?.({ block: "nearest" });
   }
+  const personalSources = sources.items.filter((source) => !(source.builtin ?? aggregateKinds.includes(source.kind)));
   return (
-    <section aria-label="Источники">
+    <section className="source-workspace" aria-label="Источники">
       <p>Источник — сайт вакансий, карьерная доска компании или публичный канал, откуда сервис берёт объявления.</p>
+      <a className="source-jump" href="#personal-sources">К моим источникам</a>
       <h2>Встроенные</h2>
       {builtins.some((type) => !connected(type)) && (
         <button type="button" className="button secondary" onClick={() => setAction("recommend")}>Подключить рекомендованный набор</button>
@@ -157,7 +159,9 @@ export function SearchSources({
             <li id={`source-${type.kind}`} key={type.kind} tabIndex={-1}>
               <h3>{type.name}</h3>
               <p>{type.description ?? type.limitations}</p>
-              <p>{source ? source.enabled ? "Включён" : "Выключен" : "Ещё не подключён"}</p>
+              <p className="status-badge" data-state={source?.enabled ? "active" : "disabled"}>
+                {source ? source.enabled ? "Включён" : "Выключен" : "Ещё не подключён"}
+              </p>
               <div className="source-actions">
                 <button type="button" className="button secondary" disabled={busy}
                   aria-label={`${source?.enabled ? "Выключить" : "Включить"} ${type.name}`}
@@ -173,11 +177,11 @@ export function SearchSources({
           );
         })}
       </ul>
-      <h2>Мои источники</h2>
-      {!sources.items.length && <p>Источники пока не добавлены.</p>}
+      <h2 id="personal-sources" tabIndex={-1}>Мои источники</h2>
+      {!personalSources.length && <p>Источники пока не добавлены.</p>}
       <p>Кнопка «Проверить» запрашивает пробный ответ и показывает доступность площадки.</p>
       <ul className="source-list">
-        {sources.items.filter((source) => !(source.builtin ?? aggregateKinds.includes(source.kind))).map((source) => (
+        {personalSources.map((source) => (
           <li key={source.id}>
             <h3>{source.name}</h3>
             <p>{source.limitations}</p>
@@ -193,39 +197,41 @@ export function SearchSources({
           </li>
         ))}
       </ul>
-      <form onSubmit={(event) => {
-        event.preventDefault();
-        void perform(async () => {
-          const data = await request<{ spec: Spec; existing: Source | null }>("/sources/resolve", {
-            method: "POST", body: { url: link.trim() },
+      <div className="source-connect">
+        <form className="inline-form-fields" onSubmit={(event) => {
+          event.preventDefault();
+          void perform(async () => {
+            const data = await request<{ spec: Spec; existing: Source | null }>("/sources/resolve", {
+              method: "POST", body: { url: link.trim() },
+            });
+            if (aggregateKinds.includes(data.spec.kind)) {
+              setPreview(null);
+              revealBuiltin(data.spec.kind);
+            } else if (data.existing) {
+              setPreview(null);
+              setMessage(`Уже подключён · ${data.existing.name}`);
+            } else setPreview(data.spec);
           });
-          if (aggregateKinds.includes(data.spec.kind)) {
-            setPreview(null);
-            revealBuiltin(data.spec.kind);
-          } else if (data.existing) {
-            setPreview(null);
-            setMessage(`Уже подключён · ${data.existing.name}`);
-          } else setPreview(data.spec);
-        });
-      }}>
-        <label>Добавить по ссылке<input required maxLength={2048} value={link}
-          onChange={(event) => { setLink(event.target.value); setPreview(null); }} /></label>
-        <button type="submit" className="button secondary" disabled={busy}>Определить источник</button>
-      </form>
-      {preview && (
-        <div>
-          <p>{specLabel(preview)} · {String(preview.config.token ?? preview.config.handle ?? "")}</p>
-          <button type="button" className="button primary" disabled={busy} onClick={() => void perform(async () => {
-            await request("/sources", { method: "POST", body: preview });
-            await reload();
-            setPreview(null);
-            setLink("");
-            setMessage("Источник подключён.");
-          })}>Подключить источник</button>
-        </div>
-      )}
-      <button type="button" className="text-button" onClick={() => edit()}>Указать параметры вручную</button>
-      <details>
+        }}>
+          <label>Добавить по ссылке<input required maxLength={2048} value={link}
+            onChange={(event) => { setLink(event.target.value); setPreview(null); }} /></label>
+          <button type="submit" className="button secondary" disabled={busy}>Определить источник</button>
+        </form>
+        {preview && (
+          <div>
+            <p>{specLabel(preview)} · {String(preview.config.token ?? preview.config.handle ?? "")}</p>
+            <button type="button" className="button primary" disabled={busy} onClick={() => void perform(async () => {
+              await request("/sources", { method: "POST", body: preview });
+              await reload();
+              setPreview(null);
+              setLink("");
+              setMessage("Источник подключён.");
+            })}>Подключить источник</button>
+          </div>
+        )}
+        <button type="button" className="text-button" onClick={() => edit()}>Указать параметры вручную</button>
+      </div>
+      <details className="source-import">
         <summary>Импортировать компании и источники</summary>
         <p>CSV до 256 КБ и 100 строк. Колонки «Компания», «Ссылка» и необязательные «Теги».</p>
         <form onSubmit={(event) => {
@@ -281,7 +287,7 @@ export function SearchSources({
       </details>
       <p role="status">{message}</p>
       {error && !action && <Notice>{error}</Notice>}
-      <dialog ref={dialog} aria-labelledby="source-dialog-title" onCancel={(event) => { event.preventDefault(); setAction(null); }}>
+      <dialog ref={dialog} className="workspace-dialog" aria-labelledby="source-dialog-title" onCancel={(event) => { event.preventDefault(); setAction(null); }}>
         <form onSubmit={(event) => { event.preventDefault(); void changeSource(); }}>
           <h2 id="source-dialog-title">{action === "recommend" ? "Рекомендованные источники"
             : action === "delete" ? `Удалить ${editing?.name}?` : action === "new" ? "Добавить подключение" : "Изменить подключение"}</h2>

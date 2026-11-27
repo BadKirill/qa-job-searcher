@@ -54,7 +54,7 @@ it("sends only nonempty messages, preserves history and renders untrusted text s
   });
   rerender(<Chat templateId="template-1" revision={1} />);
   await screen.findByText("Проверяю уточнения.");
-  expect(screen.getByText("running")).toBeInTheDocument();
+  expect(screen.getByRole("log", { name: "Сообщения диалога" })).toHaveTextContent("Помощник готовит ответ");
 });
 
 it("preserves unsent input when agent message submission fails", async () => {

@@ -178,7 +178,7 @@ test("source summary preserves actual fetch dates and explains partial and cache
 });
 
 test.each([
-  ["fresh", "Получена из источника"],
+  ["fresh", "Источник · My board"],
   ["retained", "источник недоступен"],
   ["unconfirmed", "закрытие не установлено"],
 ])("card shows freshness separately from matching: %s", (freshness, label) => {
@@ -186,6 +186,7 @@ test.each([
     <JobCard
       {...props}
       job={makeJob("fresh", {
+        source: "My board",
         freshness,
         fetched_at: run.sources![0].fetched_at,
         location_status: "unknown",

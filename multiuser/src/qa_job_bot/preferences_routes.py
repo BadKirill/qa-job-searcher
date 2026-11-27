@@ -121,7 +121,7 @@ def register_preferences_routes(app):
 
     @app.get("/api/search-presets")
     def presets():
-        return {"items": search_examples()}
+        return search_examples()
 
     @app.get("/api/sources")
     def sources(store: PersonalStore):

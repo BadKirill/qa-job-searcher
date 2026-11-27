@@ -121,7 +121,7 @@ async function accept(page: Page, token: string) {
   ).toBeVisible();
 }
 
-test("an example is a draft and the original named revision remains selectable on mobile", async ({ page, browser }) => {
+test("search templates update a named draft, and only the bottom save records a revision", async ({ page, browser }) => {
   await signIn(page);
   const invitation = await invite(page, "profile-version-designer");
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
@@ -130,14 +130,20 @@ test("an example is a draft and the original named revision remains selectable o
     await accept(member, invitation.token);
     const openCriteria = () => member.getByRole("button", { name: "Настройки поиска" }).click();
     await openCriteria();
-    const examples = member.getByLabel("Пример профиля", { exact: true });
+    const examples = member.getByLabel("Шаблон поиска", { exact: true });
     const roles = member.getByLabel("Названия ролей и синонимы");
+    const designRoles = "product designer, ux designer, ui/ux designer, продуктовый дизайнер";
     await examples.selectOption("designer");
-    await member.getByRole("button", { name: "Подставить пример" }).click();
-    await expect(roles).toHaveValue("product designer, ux designer");
-    await expect(member.getByLabel("Навыки")).toHaveValue("figma");
+    await member.getByRole("button", { name: "Применить шаблон" }).click();
+    await expect(roles).toHaveValue(designRoles);
+    await expect(member.getByLabel("Навыки и инструменты")).toHaveValue(/figma, figjam, prototyping/);
+    await expect(member.getByLabel("Приоритетные направления")).toHaveValue(/design systems/);
+    await member.getByText("Дополнительные настройки", { exact: true }).click();
+    await expect(member.getByLabel("Запросы для сайтов вакансий")).toHaveValue(designRoles);
     expect((await (await member.request.get(`${origin}/api/search-profile/history`)).json()).items).toHaveLength(0);
     expect((await (await member.request.get(`${origin}/api/sources`)).json()).items).toHaveLength(0);
+    await member.getByLabel("Англоязычные").check();
+    await member.getByLabel("Порог совпадения с критериями").fill("50");
     await member.getByRole("button", { name: "Сохранить как новую версию" }).click();
     let dialog = member.getByRole("dialog", { name: "Новая версия профиля" });
     await dialog.getByLabel("Имя варианта").fill("Дизайн продукта");
@@ -145,18 +151,32 @@ test("an example is a draft and the original named revision remains selectable o
     await expect(member.getByText(/^Сохранено · Дизайн продукта/)).toBeVisible();
     await member.reload();
     await openCriteria();
-    await expect(roles).toHaveValue("product designer, ux designer");
+    await expect(roles).toHaveValue(designRoles);
     await expect(examples).toHaveValue("");
     await member.getByLabel("Порог совпадения с критериями").scrollIntoViewIfNeeded();
     await expect(member.getByRole("button", { name: "Сохранить", exact: true })).toBeInViewport();
-    await roles.fill("brand designer");
+    await examples.selectOption("frontend");
+    await expect(roles).toHaveValue(designRoles);
+    await member.getByRole("button", { name: "Применить шаблон" }).click();
+    await expect(roles).toHaveValue(/frontend engineer, frontend developer/);
+    await expect(member.getByLabel("Навыки и инструменты")).toHaveValue(/typescript, javascript, react/);
+    await expect(member.getByLabel("Англоязычные")).toBeChecked();
+    await expect(member.getByLabel("Порог совпадения с критериями")).toHaveValue("50");
+    await roles.press("Enter");
+    const history = async () => (await (await member.request.get(`${origin}/api/search-profile/history`)).json()).items;
+    const before = await history();
+    expect(before).toHaveLength(1);
+    expect(before[0].profile.role_keywords).toContain("product designer");
     await member.getByRole("button", { name: "Сохранить", exact: true }).click();
     await expect(member.getByText(/^Сохранено · Дизайн продукта/)).toBeVisible();
+    const after = await history();
+    expect(after).toHaveLength(2);
+    expect(after[1]).toMatchObject({ variant_id: before[0].variant_id, active: true, profile: { min_score: 50, working_languages: ["en"] } });
     await member.getByText("История версий профиля", { exact: true }).click();
     const version = member.locator(".profile-versions [data-version='1']");
     await version.locator("summary").click();
-    await version.getByRole("button", { name: "Загрузить в форму" }).click();
-    await expect(roles).toHaveValue("product designer, ux designer");
+    await version.getByRole("button", { name: "Редактировать эту версию" }).click();
+    await expect(roles).toHaveValue(designRoles);
     await version.getByRole("button", { name: "Использовать в поиске" }).click();
     await expect(version).toHaveAttribute("data-active", "true");
     const saved = await (await member.request.get(`${origin}/api/search-profile`)).json();
@@ -187,8 +207,8 @@ async function choosePlace(page: Page, field: string, term: string, option: stri
 }
 
 async function applyExample(page: Page, preset: string) {
-  await page.getByLabel("Пример профиля").selectOption(preset);
-  await page.getByRole("button", { name: "Подставить пример" }).click();
+  await page.getByLabel("Шаблон поиска").selectOption(preset);
+  await page.getByRole("button", { name: "Применить шаблон" }).click();
   await page.getByRole("button", { name: "Сохранить", exact: true }).click();
   await expect(page.getByText(/^Сохранено ·/)).toBeVisible();
   await page.getByRole("button", { name: "Подключить рекомендованный набор" }).click();
@@ -655,6 +675,13 @@ test("password changes, reset links and administrator disable terminate live ses
     await signIn(member, "browser-recovery");
     await member.getByRole("button", { name: "Аккаунт и доступ" }).click();
     await member.getByRole("button", { name: "Завершить все сессии" }).click();
+    const confirmSessions = member.getByRole("dialog", { name: "Завершить все сессии?" });
+    await expect(confirmSessions.getByRole("button", { name: "Отмена" })).toBeFocused();
+    await member.keyboard.press("Escape");
+    await expect(confirmSessions).toHaveCount(0);
+    await expect(member.getByRole("heading", { name: "Аккаунт и доступ" })).toBeVisible();
+    await member.getByRole("button", { name: "Завершить все сессии" }).click();
+    await confirmSessions.getByRole("button", { name: "Завершить сессии" }).click();
     await expect(member.getByLabel("Логин", { exact: true })).toBeVisible();
   } finally {
     await Promise.allSettled([firstContext.close(), secondContext.close()]);
@@ -763,30 +790,30 @@ test("personal settings drive real source adapters and matching, persist version
     await expect(stale.getByLabel("Названия ролей и синонимы")).toHaveValue(
       "backend engineer",
     );
-    await junior.getByLabel("Навыки").fill("python");
+    await junior.getByLabel("Навыки и инструменты").fill("python");
     await junior
       .getByRole("button", { name: "Сохранить", exact: true })
       .click();
     await expect(junior.getByText(/^Сохранено ·/) ).toBeVisible();
-    await stale.getByLabel("Навыки").fill("draft stale");
+    await stale.getByLabel("Навыки и инструменты").fill("draft stale");
     await stale
       .getByRole("button", { name: "Сохранить", exact: true })
       .click();
     await expect(stale.getByRole("alert")).toContainText(
       "Настройки изменились в другой вкладке",
     );
-    await expect(stale.getByLabel("Навыки")).toHaveValue("draft stale");
+    await expect(stale.getByLabel("Навыки и инструменты")).toHaveValue("draft stale");
     await stale
       .getByRole("button", { name: "Загрузить актуальные настройки" })
       .click();
-    await expect(stale.getByLabel("Навыки")).toHaveValue("draft stale");
+    await expect(stale.getByLabel("Навыки и инструменты")).toHaveValue("draft stale");
     await stale.getByText("История версий профиля", { exact: true }).click();
     const latest = stale.locator(".profile-versions [data-active='true']");
     await latest.locator("summary").click();
-    await latest.getByRole("button", { name: "Загрузить в форму" }).click();
+    await latest.getByRole("button", { name: "Редактировать эту версию" }).click();
     await stale.getByRole("dialog", { name: "Заменить несохранённые поля?" })
       .getByRole("button", { name: "Заменить", exact: true }).click();
-    await expect(stale.getByLabel("Навыки")).toHaveValue("python");
+    await expect(stale.getByLabel("Навыки и инструменты")).toHaveValue("python");
     const sources = (
       await (await junior.request.get(`${origin}/api/sources`)).json()
     ).items;
@@ -1094,6 +1121,8 @@ test("personal schedules and administrator quotas persist while exhausted quotas
     expect(
       (await (await page.request.get(`${origin}/api/schedule`)).json()).enabled,
     ).toBe(true);
+    await member.getByRole("button", { name: "Вакансии", exact: false }).first().click();
+    await expect(member.getByText("Автоматическое обновление выключено", { exact: true })).toBeVisible();
   } finally {
     await context.close();
   }
@@ -1164,9 +1193,6 @@ test("frozen pages, partial source failures, missing feeds and personal run hist
       .click();
     await expect(member.getByText(/закрытие не установлено/)).toHaveCount(10);
     const fourth = await launchSearch(member);
-    await member
-      .getByRole("button", { name: /Показать свежую выдачу/ })
-      .click();
     await expect(
       member
         .getByRole("article")
@@ -1330,6 +1356,7 @@ test("a new mobile member configures separate pages with keyboard, gets a first 
     await expect(
       member.getByRole("heading", { name: "Критерии", exact: true }),
     ).toBeFocused();
+    await expect(setup.getByRole("heading", { name: "Подготовьте личный кабинет" })).toHaveCount(0);
     await expect(member.getByLabel("Названия ролей и синонимы")).toBeVisible();
     await expect(
       member.getByLabel("Учитывать дополнительные QA-названия"),
@@ -1632,6 +1659,14 @@ test("layout stays aligned across workspace pages and viewport sizes", async ({ 
         const brand = await memberBrand.boundingBox();
         const account = await member.locator(".topbar-account").boundingBox();
         expect(brand!.x + brand!.width).toBeLessThan(account!.x);
+        const navigation = member.getByRole("navigation", { name: "Основная навигация" });
+        await expect(navigation.getByRole("button")).toHaveCount(6);
+        for (const button of await navigation.getByRole("button").all()) {
+          const box = await button.boundingBox();
+          expect(box!.x).toBeGreaterThanOrEqual(0);
+          expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+          expect(box!.height).toBeGreaterThanOrEqual(44);
+        }
       }
       await contained(member);
       await contained(login);
@@ -1697,9 +1732,9 @@ test("layout stays aligned across workspace pages and viewport sizes", async ({ 
     for (const width of widths) {
       await member.setViewportSize({ width, height: 1050 });
       for (const [button, heading, image] of [
-        ["Вакансии", "Подходящие вакансии.", "jobs"],
-        ["Отклики", "Отклики.", "applied"],
-        ["Архив", "Архив вакансий.", "archive"],
+        ["Вакансии", "Подходящие вакансии", "jobs"],
+        ["Отклики", "Отклики", "applied"],
+        ["Архив", "Архив вакансий", "archive"],
         ["Профиль и шаблон", "Профиль и шаблон", "profile"],
         ["Настройки поиска", "Настройки поиска", "criteria"],
         ["Аккаунт и доступ", "Аккаунт и доступ", "account"],
@@ -1707,6 +1742,9 @@ test("layout stays aligned across workspace pages and viewport sizes", async ({ 
         await member.getByRole("navigation", { name: "Основная навигация" }).getByRole("button", { name: new RegExp(button) }).click();
         await expect(member.getByRole("heading", { level: 1, name: heading, exact: true })).toBeVisible();
         await expect(member.getByRole("status").filter({ hasText: /Загружаем/ })).toHaveCount(0);
+        if (image === "applied" || image === "archive") {
+          await expect(member.getByRole("button", { name: "Перейти к вакансиям" })).toBeVisible();
+        }
         await contained(member);
         if (image === "profile") {
           await member.locator(".draft-item").first().click();
@@ -1729,6 +1767,15 @@ test("layout stays aligned across workspace pages and viewport sizes", async ({ 
           await expect(member.locator(".job-list")).toHaveAttribute("aria-busy", "false");
           await expect(member.locator(".job-list")).toHaveCSS("opacity", "1");
           await contained(member);
+          if (width === 320 || width === 1440) {
+            await member.getByRole("button", { name: "Добавить вакансию" }).click();
+            const addDialog = member.getByRole("dialog", { name: "Добавить вакансию" });
+            await expect(addDialog).toHaveCSS("border-radius", "24px");
+            await expect(addDialog).not.toHaveCSS("box-shadow", "none");
+            await expectLayoutIntegrity(member);
+            await member.screenshot({ path: `test-results/design-manual-${width}.png` });
+            await addDialog.getByRole("button", { name: "Отмена" }).click();
+          }
         }
         if (image === "criteria") {
           await member.getByRole("button", { name: "Источники", exact: true }).click();
@@ -1775,7 +1822,7 @@ test("layout stays aligned across workspace pages and viewport sizes", async ({ 
     });
     expect(renamed.ok()).toBe(true);
     await member.reload();
-    await expect(member.getByRole("heading", { name: "Подходящие вакансии.", exact: true })).toBeVisible();
+    await expect(member.getByRole("heading", { name: "Подходящие вакансии", exact: true })).toBeVisible();
     await expect(member.getByRole("status").filter({ hasText: /Загружаем|Подбираем/ })).toHaveCount(0);
     await expect(member.getByRole("article").first()).toBeVisible();
     await member.locator(".list-meta").click();
@@ -1918,6 +1965,48 @@ test("geography and required hours filter the actual search with keyboard select
   }
 });
 
+test("office in Tbilisi and remote work in the EU use independent locations", async ({ page, browser }) => {
+  await signIn(page);
+  const invitation = await invite(page, "workplace-by-location");
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  try {
+    const member = await context.newPage();
+    await accept(member, invitation.token);
+    await configureSearch(member, "stage-workplace-places");
+    await member.getByRole("button", { name: "Настройки поиска" }).click();
+    await choosePlace(member, "Откуда могу работать удалённо", "ес", /^Европейский союз/);
+    await choosePlace(member, "Где готов работать в офисе", "тбил", "Тбилиси, Грузия");
+    await expect(member.getByRole("checkbox", { name: "В офисе", exact: true })).toBeChecked();
+    const save = member.getByRole("button", { name: "Сохранить", exact: true });
+    await save.click();
+    await expect(member.getByText(/^Сохранено ·/)).toBeVisible();
+    await member.reload();
+    await member.getByRole("button", { name: "Настройки поиска" }).click();
+    await expect(member.getByRole("button", { name: /^Убрать Европейский союз/ })).toBeVisible();
+    await expect(member.getByRole("button", { name: "Убрать Тбилиси, Грузия" })).toBeVisible();
+    await member.getByRole("button", { name: "Вакансии", exact: true }).click();
+    await launchSearch(member);
+    const card = (name: string) => member.getByRole("article", { name: `Backend Engineer · ${name}`, exact: true });
+    for (const name of ["EU remote", "Germany remote", "Tbilisi office"]) await expect(card(name)).toBeVisible();
+    await expect(member.getByRole("article")).toHaveCount(3);
+    await member.getByRole("button", { name: "Настройки поиска" }).click();
+    await member.getByRole("checkbox", { name: "В офисе", exact: true }).uncheck();
+    await expect(member.getByRole("button", { name: "Убрать Тбилиси, Грузия" })).toHaveCount(0);
+    await choosePlace(member, "Где готов ездить в офис при гибриде", "берлин", "Берлин, Германия");
+    await expect(member.getByRole("checkbox", { name: "Гибрид", exact: true })).toBeChecked();
+    await save.click();
+    await expect(member.getByText(/^Сохранено ·/)).toBeVisible();
+    await member.getByRole("button", { name: "Вакансии", exact: true }).click();
+    await launchSearch(member);
+    await expect(card("Berlin hybrid")).toBeVisible();
+    await expect(card("Tbilisi office")).toHaveCount(0);
+    await expect(card("Berlin office")).toHaveCount(0);
+    await expect(member.getByRole("article")).toHaveCount(3);
+  } finally {
+    await context.close();
+  }
+});
+
 test("automatic ATS checks enrich a fragment and hide a confirmed closure", async ({ page, browser }) => {
   await signIn(page);
   const invitation = await invite(page, "feedback-posting");
@@ -1933,15 +2022,14 @@ test("automatic ATS checks enrich a fragment and hide a confirmed closure", asyn
     await expect(member.getByRole("button", { name: "Выключить Remotive", exact: true })).toBeVisible();
     await member.getByRole("button", { name: /Вакансии/ }).first().click();
     await launchSearch(member);
-    await member.getByRole("button", { name: /Показать свежую выдачу/ }).click();
     const open = member.getByRole("article", { name: "Platform Specialist · Open" });
-    await expect(open.getByText(/Отрасль · fintech/i)).toBeVisible();
+    await expect(open.getByRole("list", { name: "Кратко о вакансии" })).toContainText("fintech");
     await expect(open.getByText(/100 employees/).first()).toBeVisible();
     await expect(open.getByText(/Часовой пояс · UTC\+01:00/)).toBeVisible();
     await expect(open.getByText(/Требуются · английский и русский/)).toBeVisible();
-    await expect(open.getByText(/Открыта ·/)).toBeVisible();
+    await expect(open.getByText("Вакансия открыта", { exact: true })).toBeVisible();
     const unknown = member.getByRole("article", { name: "Platform Specialist · Unknown" });
-    await expect(unknown.getByText(/Не удалось подтвердить ·/)).toBeVisible();
+    await expect(unknown.getByText("Не удалось подтвердить оригинал", { exact: true })).toBeVisible();
     await expect(unknown.getByText("Фрагмент описания", { exact: false })).toBeVisible();
     const closed = member.getByRole("article", { name: "Platform Specialist · Closed" });
     await expect(closed).toHaveCount(0);

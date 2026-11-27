@@ -131,7 +131,7 @@ test("posting evidence, hours and languages retain their separate sources and qu
   rerender(<JobCard {...props} job={job} tasks={[{ ...task, status: "running" }]} />);
   expect(screen.getByRole("status")).toHaveTextContent("Проверяем оригинал");
   rerender(<JobCard {...props} job={{ ...job, posting, description_quality: "full" }} tasks={[{ ...task, status: "ready" }]} />);
-  expect(screen.getByRole("status")).toHaveTextContent("Открыта");
+  expect(screen.getByRole("status")).toHaveTextContent("Вакансия открыта");
   expect(screen.getByText("Полное описание")).toBeVisible();
   rerender(<JobCard {...props} job={job} tasks={[{ ...task, status: "failed", error: "Фоновая проверка прервалась" }]} />);
   expect(screen.getByRole("status")).toHaveTextContent("Фоновая проверка прервалась");
@@ -151,7 +151,7 @@ test("a personal card offers its profile link, edits a saved description and rep
   await user.click(screen.getByRole("button", { name: "Открыть профиль" }));
   expect(props.onProfile).toHaveBeenCalledOnce();
   await user.click(screen.getByRole("button", { name: "Проверить объявление" }));
-  await screen.findByText(/Не удалось подтвердить ·/);
+  await screen.findByText("Не удалось подтвердить оригинал");
   await user.click(screen.getByRole("button", { name: "Изменить вакансию" }));
   const dialog = screen.getByRole("dialog", { name: "Изменить вакансию" });
   await user.click(within(dialog).getByRole("button", { name: "Сохранить вакансию" }));

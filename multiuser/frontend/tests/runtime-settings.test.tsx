@@ -87,11 +87,12 @@ it("shows personal usage without treating unknown usage as zero and persists a s
   render(<RuntimeSettings admin={false} />);
   await screen.findByText(/Вызовы за 2026-11-12/);
   expect(screen.getByText(/Токены с известным расходом/)).toHaveTextContent(
-    "1234. Вызовы без точного usage: 1",
+    "1234. Вызовы без точного учёта: 1",
   );
   expect(screen.getByText(/OpenAI запросил паузу/)).toBeInTheDocument();
   expect(server.calls.some((call) => call.path.includes("admin"))).toBe(false);
   await userEvent.click(screen.getByLabelText("Автоматический поиск"));
+  expect(screen.getByText(/Автоматический поиск выключен/)).toBeVisible();
   await userEvent.clear(screen.getByLabelText("Интервал поиска в минутах"));
   await userEvent.type(
     screen.getByLabelText("Интервал поиска в минутах"),

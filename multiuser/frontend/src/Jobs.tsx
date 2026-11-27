@@ -19,7 +19,9 @@ const summaryLabels: Record<string, string> = {
   responsibilities: "Задачи", requirements: "Требования", stack: "Стек", benefits: "Условия",
 };
 const languageNames: Record<string, string> = { ru: "русский", en: "английский" };
-const postingLabels = { open: "Открыта", closed: "Закрыта", unconfirmed: "Не удалось подтвердить" };
+const postingLabels = { open: "Вакансия открыта", closed: "Вакансия закрыта", unconfirmed: "Не удалось подтвердить оригинал" };
+const vacancyPlural = new Intl.PluralRules("ru");
+const vacancyUnits = { one: "вакансия", few: "вакансии", many: "вакансий", other: "вакансии", zero: "вакансий", two: "вакансии" };
 
 export function JobCard({
   snapshotId,
@@ -219,8 +221,8 @@ export function JobCard({
         <ul className="posting-summary" aria-label="Кратко о вакансии">
           {job.summary.map((item, index) => (
             <li key={`${item.field}-${index}`}>
-              <strong>{summaryLabels[item.field] ?? item.field}</strong> · {item.value}
-              {safeJobUrl(item.url) && <a href={safeJobUrl(item.url)!} target="_blank" rel="noreferrer" title={item.evidence}>Источник</a>}
+              <strong>{summaryLabels[item.field] ?? item.field}</strong>
+              <p>{item.value} {safeJobUrl(item.url) && <a href={safeJobUrl(item.url)!} target="_blank" rel="noreferrer" title={item.evidence}>Источник</a>}</p>
             </li>
           ))}
         </ul>
@@ -305,14 +307,14 @@ export function JobCard({
         </p>
       )}
       {personal && (
-        <div className="posting-check">
-          <p role="status">
-            {postingPending ? taskLabel(postingTask!.status, "posting_check") : postingTask?.status === "failed" ? postingTask.error : posting ? `${postingLabels[posting.status]} · ${formatCreatedAt(posting.checked_at)} · ${posting.evidence}`
-              : "Статус объявления ещё не проверен."}
-          </p>
+        <div className="posting-check" data-posting-status={posting?.status}>
+          <div role="status">
+            <strong>{postingPending ? taskLabel(postingTask!.status, "posting_check") : postingTask?.status === "failed" ? "Проверка прервалась" : posting ? postingLabels[posting.status] : "Статус объявления ещё не проверен."}</strong>
+            {!postingPending && (postingTask?.status === "failed" ? <p>{postingTask.error}</p> : posting && <p>{posting.evidence} <time dateTime={posting.checked_at}>{formatCreatedAt(posting.checked_at)}</time></p>)}
+          </div>
           <button className="button secondary" type="button" disabled={checking || postingPending}
             onClick={() => void checkOriginal()}>
-            {checking ? "Проверяем оригинал…" : job.description_quality === "fragment" || job.description_quality === "missing"
+            {checking ? "Проверяем оригинал…" : posting?.status !== "closed" && (job.description_quality === "fragment" || job.description_quality === "missing")
               ? "Найти полное описание" : "Проверить объявление"}
           </button>
         </div>
@@ -339,15 +341,34 @@ export function JobCard({
             ? "Сохранённая вакансия: источник недоступен"
             : job.freshness === "unconfirmed"
               ? "Не подтверждена в последнем ограниченном фиде; закрытие не установлено"
-              : "Получена из источника"}
+            : job.source ? `Источник · ${job.source}` : "Получена из источника"}
           {job.fetched_at && ` · ${formatCreatedAt(job.fetched_at)}`}
           {job.location_status === "unknown" && " · Географию нужно проверить"}
         </p>
       )}
       {error && <Notice>{error}</Notice>}
       <div className="job-actions">
+        {url && (
+          <a
+            className={`button primary vacancy-link${busy ? " link-disabled" : ""}`}
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-disabled={!!busy}
+            onClick={(event) => {
+              if (busy) {
+                event.preventDefault();
+                return;
+              }
+              setConfirmingApplied(true);
+            }}
+          >
+            Перейти на страницу вакансии
+            <Icon name="arrow" size={16} />
+          </a>
+        )}
         <button
-          className="button primary"
+          className={`button ${url ? "secondary" : "primary"}`}
           disabled={
             !!busy ||
             !!job.needs_refresh ||
@@ -375,24 +396,7 @@ export function JobCard({
             ? "Создаём задание…"
             : "Сделать кавер леттер"}
         </button>
-        {url ? (
-          <a
-            className={`button vacancy-link${busy ? " link-disabled" : ""}`}
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(event) => {
-              if (busy) {
-                event.preventDefault();
-                return;
-              }
-              setConfirmingApplied(true);
-            }}
-          >
-            Перейти на страницу вакансии
-            <Icon name="arrow" size={16} />
-          </a>
-        ) : (
+        {!url && (
           <span className="muted small">Ссылка недоступна</span>
         )}
       </div>
@@ -489,6 +493,7 @@ export function Jobs({
   personal = false,
   tab,
   onManual,
+  onBrowse,
   revision,
   tasks,
   hasTemplate,
@@ -498,6 +503,7 @@ export function Jobs({
   personal?: boolean;
   tab: "active" | "applied" | "archive" | "manual";
   onManual?: () => void;
+  onBrowse?: () => void;
   revision: number;
   tasks: Task[];
   hasTemplate: boolean;
@@ -530,7 +536,12 @@ export function Jobs({
     if (snapshot.current) query.set("snapshot_id", snapshot.current);
     if (run) query.set("run_id", run);
     try {
-      const data = await request<JobPage>(`/jobs?${query}`, { signal });
+      let data = await request<JobPage>(`/jobs?${query}`, { signal });
+      if (!signal.aborted && tab === "active" && page === 1 && !run && snapshot.current
+        && data.latest_run_id && data.search_run?.id !== data.latest_run_id) {
+        query.delete("snapshot_id");
+        data = await request<JobPage>(`/jobs?${query}`, { signal });
+      }
       if (signal.aborted) return;
       setError("");
       if (data.pages > 0 && page > data.pages) {
@@ -602,22 +613,17 @@ export function Jobs({
   }
   const headings = {
     active: {
-      eyebrow: "ВАШ СЛЕДУЮЩИЙ ШАГ",
       title: "Подходящие вакансии",
-      description: "Возможности, с которых хочется начать разговор.",
     },
     applied: {
-      eyebrow: "ВАШИ ОТКЛИКИ",
       title: "Отклики",
       description: "Вакансии, на которые вы уже откликнулись.",
     },
     manual: {
-      eyebrow: "ЛИЧНЫЕ ВАКАНСИИ",
       title: "Добавленные вручную",
       description: "Вакансии, которые вы сохранили по ссылке или описанию.",
     },
     archive: {
-      eyebrow: "ВСЁ ПОД КОНТРОЛЕМ",
       title: "Архив вакансий",
       description: "Вакансии, которые вы отложили. Любую можно вернуть.",
     },
@@ -626,12 +632,10 @@ export function Jobs({
     <div>
       <div className="page-heading">
         <div>
-          <p className="eyebrow">{headings.eyebrow}</p>
           <h1>
             {headings.title}
-            <span className="heading-dot">.</span>
           </h1>
-          <p className="muted">{headings.description}</p>
+          {"description" in headings && <p className="muted">{headings.description}</p>}
         </div>
         {tab === "active" && (
           <button
@@ -649,7 +653,7 @@ export function Jobs({
           onClick={() => void cancelSearch(searchTask)}>Отменить поиск</button>
       )}
       {personal && (tab === "active" || tab === "manual") && (
-        <div className="source-actions">
+        <div className="job-list-actions">
           <button type="button" className="button secondary" onClick={() => setAddJob(true)}>Добавить вакансию</button>
           {tab === "active" && onManual && (
             <button type="button" className="text-button" onClick={onManual}>Добавленные вручную</button>
@@ -667,10 +671,10 @@ export function Jobs({
       {manualFeedback && <Notice tone="success">{manualFeedback}</Notice>}
       <div className="list-meta">
         <span>
-          {result ? `${result.total} вакансий` : "Ваши вакансии"}
-          <span className="dot-separator">·</span>По 10 на странице
+          {result ? `${result.total} ${vacancyUnits[vacancyPlural.select(result.total)]}` : "Ваши вакансии"}
+          {result && result.pages > 1 && <><span className="dot-separator">·</span>По 10 на странице</>}
         </span>
-        <span>
+        {tab === "active" && <span>
           {result?.last_search_at
             ? `Последний поиск: ${formatCreatedAt(result.last_search_at)}`
             : "Поиск ещё не завершался"}
@@ -679,7 +683,10 @@ export function Jobs({
             new Date(result.snapshot_at).getTime() <
               new Date(result.last_search_at).getTime() &&
             " · Просматривается сохранённый снимок"}
-        </span>
+          {result?.schedule && <small className="search-freshness-schedule">{result.schedule.enabled
+            ? `Следующее автообновление · ${formatCreatedAt(new Date(result.schedule.next_run_at * 1000).toISOString())}`
+            : "Автоматическое обновление выключено"}</small>}
+        </span>}
       </div>
       {error && (
         <Notice>
@@ -743,14 +750,14 @@ export function Jobs({
           </div>
           <h2>
             {tab === "active"
-              ? "Новые возможности впереди"
+              ? result.last_search_at ? "Подходящих вакансий пока нет" : "Начните поиск"
               : tab === "applied"
                 ? "Откликов пока нет"
                 : tab === "manual" ? "Добавленных вручную вакансий пока нет" : "В архиве пока пусто"}
           </h2>
           <p>
             {tab === "active"
-              ? "Запустите поиск, чтобы получить актуальные вакансии."
+              ? result.last_search_at ? "Обновите поиск или измените критерии в настройках." : "Запустите поиск, чтобы получить актуальные вакансии."
               : tab === "applied"
                 ? "После подтверждения отклика вакансия появится здесь."
                 : tab === "manual" ? "Добавьте вакансию по ссылке или вставьте её описание."
@@ -765,6 +772,9 @@ export function Jobs({
               Найти вакансии
               <Icon name="arrow" />
             </button>
+          )}
+          {(tab === "applied" || tab === "archive") && onBrowse && (
+            <button type="button" className="button primary" onClick={onBrowse}>Перейти к вакансиям</button>
           )}
         </div>
       ) : (
@@ -841,7 +851,7 @@ export function Jobs({
           </>
         )
       )}
-      {personal && (
+      {personal && tab === "active" && (
         <SearchHistory
           revision={revision + refresh}
           onSelect={(id) => {
@@ -852,7 +862,7 @@ export function Jobs({
           }}
         />
       )}
-      {result?.search_run && <SearchRunSummary run={result.search_run} />}
+      {tab === "active" && result?.search_run && <SearchRunSummary run={result.search_run} />}
     </div>
   );
 }

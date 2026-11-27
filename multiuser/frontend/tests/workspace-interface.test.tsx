@@ -194,7 +194,7 @@ it("keeps unsaved search criteria while switching separate pages and only shows 
   expect(screen.getByLabelText("Названия ролей и синонимы")).toHaveValue(
     "backend engineer, architect",
   );
-  await userEvent.selectOptions(screen.getByLabelText("Пример профиля"), "qa");
+  await userEvent.selectOptions(screen.getByLabelText("Шаблон поиска"), "qa");
   expect(
     screen.getByLabelText("Учитывать дополнительные QA-названия"),
   ).toBeInTheDocument();

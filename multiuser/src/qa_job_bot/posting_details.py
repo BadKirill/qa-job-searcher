@@ -9,8 +9,9 @@ from qa_job_bot.geography import mentioned_places
 from qa_job_bot.models import canonical_text, utcnow
 from qa_job_bot.openai_transport import OpenAITransport, OpenAITransportError, RateLimited
 from qa_job_bot.source_http import SourceClient, SourceNetworkError
-from qa_job_bot.source_links import SOURCE_HOSTS, PostingLink, posting_link
+from qa_job_bot.source_links import SOURCE_HOSTS, PostingLink, https_parts, posting_link
 from qa_job_bot.sources.lever import LeverSource
+from qa_job_bot.sources.remote_com import RemoteComSource
 from qa_job_bot.utils import html_to_text
 
 MIN_DESCRIPTION = 40
@@ -172,6 +173,35 @@ def known_posting_link(url):
         return posting_link(url or "")
     except ValueError:
         return None
+
+
+def remote_com_posting_key(url):
+    try:
+        parts, path = https_parts(url or "")
+    except ValueError:
+        return None
+    if (
+        parts.hostname == "remote.com"
+        and len(path) == 3
+        and path[0] == "jobs"
+        and all(re.fullmatch(r"[A-Za-z0-9_-]{1,160}", slug) for slug in path[1:])
+    ):
+        return tuple(path[1:])
+    return None
+
+
+async def remote_com_original(key, factory):
+    try:
+        async with factory() as client:
+            response = await client.get(f"{RemoteComSource.endpoint}/{'/'.join(key)}")
+            response.raise_for_status()
+        data = response.json()["data"]
+        if ((data.get("company_profile") or {}).get("slug"), data.get("slug")) == key:
+            url = data.get("apply_url")
+            return known_posting_link(url) if isinstance(url, str) else None
+    except (httpx.HTTPError, SourceNetworkError, ValueError, TypeError, AttributeError, KeyError):
+        return None
+    return None
 
 
 def posting_phrases(description):

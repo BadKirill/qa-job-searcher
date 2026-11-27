@@ -106,15 +106,14 @@ export function Workspace({
       </a>
       <aside className="sidebar">
         <Brand />
-        <div className="workspace-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
         <nav aria-label="Основная навигация">
           <button
-            className={view === "active" ? "nav-item selected" : "nav-item"}
+            className={view === "active" || view === "manual" ? "nav-item selected" : "nav-item"}
             onClick={() => setView("active")}
-            aria-current={view === "active" ? "page" : undefined}
+            aria-current={view === "active" || view === "manual" ? "page" : undefined}
           >
             <Icon name="jobs" />
-            Вакансии<span className="nav-arrow">↗</span>
+            Вакансии
           </button>
           <button
             className={view === "applied" ? "nav-item selected" : "nav-item"}
@@ -179,12 +178,7 @@ export function Workspace({
           <div className="sidebar-template-icon">
             <Icon name="file" />
           </div>
-          <h3>Сильный отклик начинается с вас</h3>
-          <p>
-            {profile?.active
-              ? "Эталон готов. Создавайте CV и письма прямо из карточек вакансий."
-              : "Задайте эталон CV, чтобы подготовить документы под каждую вакансию."}
-          </p>
+          <h3>{profile?.active ? "Эталон CV готов" : "Эталон CV ещё не загружен"}</h3>
           <button onClick={() => setView("profile")} className="text-button">
             {profile?.active
               ? "Изменить эталонный шаблон"
@@ -193,10 +187,6 @@ export function Workspace({
           </button>
         </div>
         <div className="sidebar-bottom">
-          <span className="private-label">
-            <span className="status-dot" />
-            Личное пространство
-          </span>
           <button
             className="text-button"
             onClick={() => void logout()}
@@ -209,7 +199,6 @@ export function Workspace({
       </aside>
       <div className="main-shell">
         <header className="topbar">
-          <span>Ваш поиск. Ваш следующий шаг.</span>
           <div className="topbar-account">
             {user && (
               <span
@@ -253,7 +242,7 @@ export function Workspace({
               </button>
             </Notice>
           )}
-          {user && <WorkspaceStatus revision={revision} onNavigate={setView} />}
+          {user && <WorkspaceStatus revision={revision} onNavigate={setView} showSetup={view === "active"} />}
           {["search_settings", "criteria", "sources"].includes(view) ? (
             <SearchSettings
               section={view === "criteria" || view === "sources" ? view : "all"}
@@ -285,6 +274,7 @@ export function Workspace({
               key={view}
               tab={view === "applied" || view === "archive" || view === "manual" ? view : "active"}
               onManual={() => setView("manual")}
+              onBrowse={() => setView("active")}
               revision={revision}
               tasks={tasks}
               hasTemplate={!!profile?.active}
@@ -294,7 +284,6 @@ export function Workspace({
           )}
           <footer className="main-footer">
             <span>getCareer</span>
-            <span>Следующая хорошая возможность уже ближе.</span>
           </footer>
         </main>
       </div>

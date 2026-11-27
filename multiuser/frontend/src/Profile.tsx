@@ -166,10 +166,9 @@ export function Profile({
     <div className="profile-page">
       <div className="page-heading">
         <div>
-          <p className="eyebrow">ОСНОВА КАЖДОГО ОТКЛИКА</p>
           <h1>Профиль и шаблон</h1>
           <p className="muted">
-            Ваш опыт, ваш стиль, только подтверждённые факты.
+            Проверьте факты из резюме и задайте правила для откликов.
           </p>
         </div>
       </div>
@@ -196,7 +195,7 @@ export function Profile({
           <h2>
             {profile.active
               ? profile.active.filename
-              : "Один шаблон для всех возможностей"}
+              : "Загрузите резюме"}
           </h2>
           <p className="muted">
             {profile.active
@@ -224,12 +223,12 @@ export function Profile({
         </button>
         <small>PDF или DOCX, до 10 МБ</small>
       </section>
-      <p className="template-format-note muted small">
-        Поддерживаются базовые стили одноколоночного CV: шрифт, поля и размер
-        страницы. PDF сохраняется вместе с изображениями страниц для визуального
-        сравнения. Колонки, фотографии и сложные таблицы не воспроизводятся;
-        точное совпадение оформления не гарантируется.
-      </p>
+      <details className="template-format-note muted small">
+        <summary>Как переносится оформление CV</summary>
+        <p>Приложение переносит шрифт, поля и размер страницы одноколоночного CV.
+          Страницы исходного PDF доступны для визуального сравнения. Сложные
+          таблицы, колонки и фотографии могут отличаться в готовом документе.</p>
+      </details>
       <div className="language-note">
         <Icon name="check" size={16} />
         <span>CV всегда на английском. Cover letter — на языке вакансии.</span>
@@ -265,7 +264,6 @@ export function Profile({
           <section className="facts-editor">
             <header>
               <div>
-                <p className="eyebrow">ПРОВЕРЬТЕ ПЕРЕД СОХРАНЕНИЕМ</p>
                 <h2>Факты из вашего CV</h2>
               </div>
               <button
@@ -413,7 +411,7 @@ export function Profile({
             />
           </div>
         </div>
-      ) : (
+      ) : !profile.active && (
         <section className="profile-help">
           <span className="eyebrow">КАК ЭТО РАБОТАЕТ</span>
           <div>

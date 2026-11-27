@@ -21,7 +21,7 @@ from qa_job_bot.search_models import (
     SearchSpec,
     SourceSpec,
     clean_text,
-    search_presets,
+    search_examples,
     universal_profile,
 )
 from qa_job_bot.source_catalog import build_personal_sources
@@ -127,11 +127,12 @@ def test_personal_factory_uses_only_enabled_sources_and_personal_queries():
     assert len(sources) == 9
     assert sources[1].queries == ("engineer",) and sources[3].queries == ("engineer",)
     assert sources[-1].role_keywords == ("backend engineer",)
-    qa = build_personal_sources(rows, SearchSpec.model_validate(search_presets()["qa"]).runtime())
+    templates = search_examples()["items"]
+    qa = build_personal_sources(rows, SearchSpec.model_validate(templates["qa"]).runtime())
     assert "sdet" in qa[-1].role_keywords
     assert build_personal_sources([], spec().runtime()) == []
     assert build_personal_sources(rows, spec().runtime())[1].queries == ("backend engineer",)
-    assert universal_profile(search_presets()["developer"]) == search_presets()["developer"]
+    assert universal_profile(templates["developer"]) == templates["developer"]
 
 
 @pytest.mark.parametrize(
@@ -377,7 +378,22 @@ def test_preferences_api_isolated_and_validated(api_world):
     assert other.get("/api/search-settings").json()["sources"]["items"] == []
     assert other.post("/api/search-runs").status_code == 409
     assert len(other.get("/api/source-types").json()["items"]) == 9
-    assert set(other.get("/api/search-presets").json()["items"]) == {"qa", "developer", "designer"}
+    catalog = other.get("/api/search-presets").json()
+    assert len(catalog["items"]) == 14
+    assert {"qa", "developer", "designer", "manual_qa", "qa_automation", "frontend"} <= set(
+        catalog["items"]
+    )
+    assert catalog["items"].keys() == catalog["labels"].keys()
+    assert len(set(catalog["labels"].values())) == len(catalog["items"])
+    for profile in catalog["items"].values():
+        template = SearchSpec.model_validate(profile)
+        assert len(template.role_keywords) >= 4 and template.source_queries
+        assert template.focus_qa_keywords and template.skill_keywords
+        assert not template.candidate_locations and not template.excluded_title_keywords
+        assert not template.working_languages and not template.exclude_entry_level
+    assert "playwright" in catalog["items"]["qa_automation"]["skill_keywords"]
+    assert "figma" in catalog["items"]["designer"]["skill_keywords"]
+    assert not other.get("/api/search-profile/history").json()["items"]
     assert (
         other.put(
             "/api/search-profile", json={"expected_version": 0, "profile": spec().model_dump()}
@@ -489,12 +505,11 @@ async def test_worker_uses_profile_pinned_when_each_search_is_enqueued(pg_store,
     from qa_job_bot.search_pipeline import SourceBatch
     from qa_job_bot.web_security import WebSettings
 
-    pg_store.save_search_profile(SearchSpec.model_validate(search_presets()["developer"]), 0)
+    template = SearchSpec.model_validate(search_examples()["items"]["developer"])
+    pg_store.save_search_profile(template, 0)
     pg_store.add_source_set([SourceSpec(kind=kind) for kind in AGGREGATORS])
     search, interval = build_search(pg_store)
-    assert (
-        search.profile.role_keywords == ("backend engineer", "software engineer") and interval > 0
-    )
+    assert search.profile.role_keywords == tuple(template.role_keywords) and interval > 0
     built = []
 
     async def fetch(inputs):
@@ -512,7 +527,7 @@ async def test_worker_uses_profile_pinned_when_each_search_is_enqueued(pg_store,
     second = pg_store.enqueue_search("second")
     assert await worker.once()
     assert pg_store.search_run(second["id"])["published"] is True
-    assert built == [("backend engineer", "software engineer"), ("designer",)]
+    assert built == [tuple(template.role_keywords), ("designer",)]
 
 
 def test_upgrade_four_backfills_existing_sources_without_changing_configuration(pg_store):
