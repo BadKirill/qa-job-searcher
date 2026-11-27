@@ -81,34 +81,22 @@ export function Login({
       <div className="login-intro">
         <Brand />
         <div>
-          <p className="eyebrow">МЕНЬШЕ ПОИСКА. БОЛЬШЕ ВОЗМОЖНОСТЕЙ.</p>
-          <h1>
-            Следующая работа
-            <br />
-            начинается здесь<span>.</span>
-          </h1>
           <p className="login-description">
-            Подходящие вакансии, ваше резюме и продуманные отклики — в одном
-            рабочем пространстве.
+            Поиск вакансий и подготовка документов для отклика.
           </p>
         </div>
-        <span className="login-footnote">Ваш личный поиск работы</span>
       </div>
       <div className="login-form-wrap">
         <form className="login-form" onSubmit={submit}>
-          <div className="round-icon">
-            <Icon name="profile" size={24} />
-          </div>
-          <p className="eyebrow">ЛИЧНОЕ ПРОСТРАНСТВО</p>
-          <h2>
+          <h1>
             {link.kind === "invite"
               ? "Принять приглашение"
               : link.kind === "reset"
                 ? "Восстановить доступ"
                 : session.setup_required
                   ? "Добро пожаловать"
-                  : "С возвращением"}
-          </h2>
+                  : "Вход в getCareer"}
+          </h1>
           <p className="muted">
             {link.kind === "invite"
               ? "Задайте пароль для своего личного кабинета."

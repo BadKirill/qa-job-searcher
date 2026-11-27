@@ -81,29 +81,28 @@ export function RuntimeSettings({ admin }: { admin: boolean }) {
   return (
     <section className="runtime-settings" aria-label="Расписание и лимиты">
       {error && <Notice>{error}</Notice>}
-      {notice && <Notice tone="info">{notice}</Notice>}
+      {notice && <Notice tone="success">{notice}</Notice>}
       {!usage || !schedule ? (
         <Loading />
       ) : (
         <>
-          <h2>Использование OpenAI</h2>
-          <p>
-            Вызовы за {usage.day} (UTC): {usage.used_calls} из{" "}
-            {usage.daily_calls}.
-          </p>
-          <p>
-            Токены с известным расходом: {usage.tokens}. Вызовы без точного
-            usage: {usage.unknown_calls}.
-          </p>
-          <p>
-            Генерация, каждая проверка, исправление и чат учитываются отдельно.
-            Неизвестный исход сохраняет резерв.
-          </p>
-          {usage.cooldown_until * 1000 > Date.now() && (
-            <Notice tone="info">
-              OpenAI запросил паузу. Задания ожидают доступности API.
-            </Notice>
-          )}
+          <section className="usage-summary" aria-labelledby="usage-title">
+            <h2 id="usage-title">Использование OpenAI</h2>
+            <p>
+              Вызовы за {usage.day} (UTC): {usage.used_calls} из{" "}
+              {usage.daily_calls}.
+            </p>
+            <p>
+              Токены с известным расходом: {usage.tokens}. Вызовы без точного
+              учёта: {usage.unknown_calls}.
+            </p>
+            <p className="muted">Генерация, проверка, исправление и чат расходуют лимит отдельно.</p>
+            {usage.cooldown_until * 1000 > Date.now() && (
+              <Notice tone="info">
+                OpenAI запросил паузу. Задания ожидают доступности API.
+              </Notice>
+            )}
+          </section>
           <form
             onSubmit={(event) => {
               event.preventDefault();
@@ -141,9 +140,9 @@ export function RuntimeSettings({ admin }: { admin: boolean }) {
               />
             </label>
             <p>
-              Следующий запуск:{" "}
-              {new Date(schedule.next_run_at * 1000).toLocaleString()}. Нужны
-              настроенный профиль и включённые источники.
+              {schedule.enabled
+                ? `Следующий запуск · ${new Date(schedule.next_run_at * 1000).toLocaleString()}. Нужны сохранённые критерии и включённые источники.`
+                : "Автоматический поиск выключен. Ручной поиск доступен на странице вакансий."}
             </p>
             <button className="button primary" disabled={busy}>
               Сохранить расписание

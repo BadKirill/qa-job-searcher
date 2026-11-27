@@ -20,6 +20,8 @@ const summaryLabels: Record<string, string> = {
 };
 const languageNames: Record<string, string> = { ru: "русский", en: "английский" };
 const postingLabels = { open: "Вакансия открыта", closed: "Вакансия закрыта", unconfirmed: "Не удалось подтвердить оригинал" };
+const vacancyPlural = new Intl.PluralRules("ru");
+const vacancyUnits = { one: "вакансия", few: "вакансии", many: "вакансий", other: "вакансии", zero: "вакансий", two: "вакансии" };
 
 export function JobCard({
   snapshotId,
@@ -339,15 +341,34 @@ export function JobCard({
             ? "Сохранённая вакансия: источник недоступен"
             : job.freshness === "unconfirmed"
               ? "Не подтверждена в последнем ограниченном фиде; закрытие не установлено"
-              : "Получена из источника"}
+            : job.source ? `Источник · ${job.source}` : "Получена из источника"}
           {job.fetched_at && ` · ${formatCreatedAt(job.fetched_at)}`}
           {job.location_status === "unknown" && " · Географию нужно проверить"}
         </p>
       )}
       {error && <Notice>{error}</Notice>}
       <div className="job-actions">
+        {url && (
+          <a
+            className={`button primary vacancy-link${busy ? " link-disabled" : ""}`}
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-disabled={!!busy}
+            onClick={(event) => {
+              if (busy) {
+                event.preventDefault();
+                return;
+              }
+              setConfirmingApplied(true);
+            }}
+          >
+            Перейти на страницу вакансии
+            <Icon name="arrow" size={16} />
+          </a>
+        )}
         <button
-          className="button primary"
+          className={`button ${url ? "secondary" : "primary"}`}
           disabled={
             !!busy ||
             !!job.needs_refresh ||
@@ -375,24 +396,7 @@ export function JobCard({
             ? "Создаём задание…"
             : "Сделать кавер леттер"}
         </button>
-        {url ? (
-          <a
-            className={`button vacancy-link${busy ? " link-disabled" : ""}`}
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(event) => {
-              if (busy) {
-                event.preventDefault();
-                return;
-              }
-              setConfirmingApplied(true);
-            }}
-          >
-            Перейти на страницу вакансии
-            <Icon name="arrow" size={16} />
-          </a>
-        ) : (
+        {!url && (
           <span className="muted small">Ссылка недоступна</span>
         )}
       </div>
@@ -489,6 +493,7 @@ export function Jobs({
   personal = false,
   tab,
   onManual,
+  onBrowse,
   revision,
   tasks,
   hasTemplate,
@@ -498,6 +503,7 @@ export function Jobs({
   personal?: boolean;
   tab: "active" | "applied" | "archive" | "manual";
   onManual?: () => void;
+  onBrowse?: () => void;
   revision: number;
   tasks: Task[];
   hasTemplate: boolean;
@@ -665,10 +671,10 @@ export function Jobs({
       {manualFeedback && <Notice tone="success">{manualFeedback}</Notice>}
       <div className="list-meta">
         <span>
-          {result ? `${result.total} вакансий` : "Ваши вакансии"}
-          <span className="dot-separator">·</span>По 10 на странице
+          {result ? `${result.total} ${vacancyUnits[vacancyPlural.select(result.total)]}` : "Ваши вакансии"}
+          {result && result.pages > 1 && <><span className="dot-separator">·</span>По 10 на странице</>}
         </span>
-        <span>
+        {tab === "active" && <span>
           {result?.last_search_at
             ? `Последний поиск: ${formatCreatedAt(result.last_search_at)}`
             : "Поиск ещё не завершался"}
@@ -680,7 +686,7 @@ export function Jobs({
           {result?.schedule && <small className="search-freshness-schedule">{result.schedule.enabled
             ? `Следующее автообновление · ${formatCreatedAt(new Date(result.schedule.next_run_at * 1000).toISOString())}`
             : "Автоматическое обновление выключено"}</small>}
-        </span>
+        </span>}
       </div>
       {error && (
         <Notice>
@@ -744,14 +750,14 @@ export function Jobs({
           </div>
           <h2>
             {tab === "active"
-              ? "Новые возможности впереди"
+              ? result.last_search_at ? "Подходящих вакансий пока нет" : "Начните поиск"
               : tab === "applied"
                 ? "Откликов пока нет"
                 : tab === "manual" ? "Добавленных вручную вакансий пока нет" : "В архиве пока пусто"}
           </h2>
           <p>
             {tab === "active"
-              ? "Запустите поиск, чтобы получить актуальные вакансии."
+              ? result.last_search_at ? "Обновите поиск или измените критерии в настройках." : "Запустите поиск, чтобы получить актуальные вакансии."
               : tab === "applied"
                 ? "После подтверждения отклика вакансия появится здесь."
                 : tab === "manual" ? "Добавьте вакансию по ссылке или вставьте её описание."
@@ -766,6 +772,9 @@ export function Jobs({
               Найти вакансии
               <Icon name="arrow" />
             </button>
+          )}
+          {(tab === "applied" || tab === "archive") && onBrowse && (
+            <button type="button" className="button primary" onClick={onBrowse}>Перейти к вакансиям</button>
           )}
         </div>
       ) : (
@@ -842,7 +851,7 @@ export function Jobs({
           </>
         )
       )}
-      {personal && (
+      {personal && tab === "active" && (
         <SearchHistory
           revision={revision + refresh}
           onSelect={(id) => {
@@ -853,7 +862,7 @@ export function Jobs({
           }}
         />
       )}
-      {result?.search_run && <SearchRunSummary run={result.search_run} />}
+      {tab === "active" && result?.search_run && <SearchRunSummary run={result.search_run} />}
     </div>
   );
 }

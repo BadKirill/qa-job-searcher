@@ -137,7 +137,6 @@ export function Chat({
     <section className="chat-panel" aria-label="Диалог с агентом">
       <header className="chat-heading">
         <div>
-          <span className="eyebrow">ВАШ ПОМОЩНИК</span>
           <h3>Обсудим детали</h3>
         </div>
         {onClose && (
@@ -155,7 +154,7 @@ export function Chat({
         подтвердить в профиле перед созданием документов.
       </p>
       {error && <Notice>{error}</Notice>}
-      <div className="messages" aria-live="polite">
+      <div className="messages" role="log" aria-label="Сообщения диалога" aria-relevant="additions text">
         {loading ? (
           <Loading />
         ) : messages.length === 0 ? (
@@ -180,7 +179,9 @@ export function Chat({
                 <small>
                   {message.status === "queued"
                     ? "Ожидает ответа"
-                    : message.status}
+                    : message.status === "running"
+                      ? "Помощник готовит ответ"
+                      : "Ответ не получен. Попробуйте отправить сообщение снова."}
                 </small>
               )}
             </div>
@@ -188,7 +189,7 @@ export function Chat({
         )}
       </div>
       <form className="chat-form" onSubmit={send}>
-        <label className="sr-only" htmlFor={messageInputId}>
+        <label htmlFor={messageInputId}>
           Сообщение агенту
         </label>
         <textarea

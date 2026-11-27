@@ -505,7 +505,6 @@ export function SearchSettings({
     <section className="search-settings">
       <header className="page-heading">
         <div>
-          <p className="eyebrow">ЛИЧНЫЙ ПОИСК</p>
           <h1>
             {page === "criteria"
               ? "Критерии"
@@ -542,7 +541,7 @@ export function SearchSettings({
       {error && (
         <Notice>
           {error}
-          <button
+          {(!state || accountConflict) && <button
             className="text-button"
             onClick={() => {
               if (!accountConflict || !state) {
@@ -557,7 +556,7 @@ export function SearchSettings({
             }}
           >
             Загрузить актуальные настройки
-          </button>
+          </button>}
         </Notice>
       )}
       <dialog ref={dialog} className="workspace-dialog" aria-labelledby={`${historyId}-confirmation`}

@@ -160,7 +160,7 @@ export function TaskStatus({
               {createdAt}
             </time>
           )}
-          <span className="task-label">
+          <span className="task-label" aria-live="polite">
             {isPending(task.status) && <span className="spinner" />}
             {taskLabel(task.status, task.kind)}
           </span>

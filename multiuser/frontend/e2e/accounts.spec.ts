@@ -675,6 +675,13 @@ test("password changes, reset links and administrator disable terminate live ses
     await signIn(member, "browser-recovery");
     await member.getByRole("button", { name: "Аккаунт и доступ" }).click();
     await member.getByRole("button", { name: "Завершить все сессии" }).click();
+    const confirmSessions = member.getByRole("dialog", { name: "Завершить все сессии?" });
+    await expect(confirmSessions.getByRole("button", { name: "Отмена" })).toBeFocused();
+    await member.keyboard.press("Escape");
+    await expect(confirmSessions).toHaveCount(0);
+    await expect(member.getByRole("heading", { name: "Аккаунт и доступ" })).toBeVisible();
+    await member.getByRole("button", { name: "Завершить все сессии" }).click();
+    await confirmSessions.getByRole("button", { name: "Завершить сессии" }).click();
     await expect(member.getByLabel("Логин", { exact: true })).toBeVisible();
   } finally {
     await Promise.allSettled([firstContext.close(), secondContext.close()]);
@@ -1349,6 +1356,7 @@ test("a new mobile member configures separate pages with keyboard, gets a first 
     await expect(
       member.getByRole("heading", { name: "Критерии", exact: true }),
     ).toBeFocused();
+    await expect(setup.getByRole("heading", { name: "Подготовьте личный кабинет" })).toHaveCount(0);
     await expect(member.getByLabel("Названия ролей и синонимы")).toBeVisible();
     await expect(
       member.getByLabel("Учитывать дополнительные QA-названия"),
@@ -1651,6 +1659,14 @@ test("layout stays aligned across workspace pages and viewport sizes", async ({ 
         const brand = await memberBrand.boundingBox();
         const account = await member.locator(".topbar-account").boundingBox();
         expect(brand!.x + brand!.width).toBeLessThan(account!.x);
+        const navigation = member.getByRole("navigation", { name: "Основная навигация" });
+        await expect(navigation.getByRole("button")).toHaveCount(6);
+        for (const button of await navigation.getByRole("button").all()) {
+          const box = await button.boundingBox();
+          expect(box!.x).toBeGreaterThanOrEqual(0);
+          expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+          expect(box!.height).toBeGreaterThanOrEqual(44);
+        }
       }
       await contained(member);
       await contained(login);
@@ -1726,6 +1742,9 @@ test("layout stays aligned across workspace pages and viewport sizes", async ({ 
         await member.getByRole("navigation", { name: "Основная навигация" }).getByRole("button", { name: new RegExp(button) }).click();
         await expect(member.getByRole("heading", { level: 1, name: heading, exact: true })).toBeVisible();
         await expect(member.getByRole("status").filter({ hasText: /Загружаем/ })).toHaveCount(0);
+        if (image === "applied" || image === "archive") {
+          await expect(member.getByRole("button", { name: "Перейти к вакансиям" })).toBeVisible();
+        }
         await contained(member);
         if (image === "profile") {
           await member.locator(".draft-item").first().click();

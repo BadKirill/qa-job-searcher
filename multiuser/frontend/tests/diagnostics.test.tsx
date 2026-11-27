@@ -35,7 +35,7 @@ it("shows operational counts and refreshes without retaining stale values", asyn
   expect(screen.getByText(/Просроченные задания/)).toHaveTextContent(
     "1. Самое долгое ожидание: 42",
   );
-  expect(screen.getByText(/Вызовы без точного usage/)).toHaveTextContent(
+  expect(screen.getByText(/Вызовы без точного учёта/)).toHaveTextContent(
     "3. Пауза OpenAI: 60",
   );
   expect(screen.getByText("Поиск: 2")).toBeInTheDocument();

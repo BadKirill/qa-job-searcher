@@ -52,15 +52,17 @@ export function Diagnostics() {
       {!status && !error && <Loading />}
       {status && (
         <>
-          <p>
-            Просроченные задания: {status.expired_leases}. Самое долгое
-            ожидание: {status.oldest_wait_seconds} с.
-          </p>
-          <p>
-            Вызовы без точного usage: {status.unknown_usage}. Пауза OpenAI:{" "}
-            {status.cooldown_seconds} с.
-          </p>
-          <p>Ошибки источников за всю историю: {status.source_errors}.</p>
+          <div className="diagnostics-summary">
+            <p>
+              Просроченные задания: {status.expired_leases}. Самое долгое
+              ожидание: {status.oldest_wait_seconds} с.
+            </p>
+            <p>
+              Вызовы без точного учёта: {status.unknown_usage}. Пауза OpenAI:{" "}
+              {status.cooldown_seconds} с.
+            </p>
+            <p>Ошибки источников за всю историю: {status.source_errors}.</p>
+          </div>
           <h3>Сервисы с сигналом за последнюю минуту</h3>
           <ul>
             {Object.entries(status.services).map(([name, count]) => (

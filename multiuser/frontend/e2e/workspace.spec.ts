@@ -40,7 +40,7 @@ test("private access, pagination, applied and archive survive browser reload", a
   expect((await page.request.get("/api/tasks/guessed/document-preview")).status()).toBe(401);
   await signIn(page);
   await expect(page.getByRole("article")).toHaveCount(10);
-  await expect(page.getByText("21 вакансий", { exact: false })).toBeVisible();
+  await expect(page.getByText("21 вакансия", { exact: false })).toBeVisible();
   await expect(page.getByText("Последний поиск:", { exact: false })).toBeVisible();
   await expect(
     page.getByRole("article", { name: "Senior QA Engineer 03" }).getByText("97/100"),
@@ -386,14 +386,14 @@ test("mobile layout stays within viewport and logout closes access", async ({
     .getByRole("button", { name: "Выйти из аккаунта", exact: true })
     .click();
   await expect(
-    page.getByRole("heading", { name: "С возвращением" }),
+    page.getByRole("heading", { name: "Вход в getCareer" }),
   ).toBeVisible();
   expect((await page.request.get("/api/tasks")).status()).toBe(401);
   await page.getByLabel("Пароль", { exact: true }).fill("incorrect-password");
   await page.getByRole("button", { name: "Войти", exact: true }).click();
   await expect(page.getByRole("alert")).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "С возвращением" }),
+    page.getByRole("heading", { name: "Вход в getCareer" }),
   ).toBeVisible();
 });
 

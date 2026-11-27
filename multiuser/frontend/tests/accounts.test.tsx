@@ -216,6 +216,9 @@ it("changes the password, rotates CSRF and revokes all sessions for an ordinary 
   await userEvent.click(
     screen.getByRole("button", { name: "Завершить все сессии" }),
   );
+  const dialog = screen.getByRole("dialog", { name: "Завершить все сессии?" });
+  expect(onLogout).not.toHaveBeenCalled();
+  await userEvent.click(within(dialog).getByRole("button", { name: "Завершить сессии" }));
   expect(onLogout).toHaveBeenCalledOnce();
   expect(backend.calls[1].headers["X-CSRF-Token"]).toBe("rotated-csrf");
 });
@@ -276,6 +279,8 @@ it("lets administrators invite, reissue, reset, disable, reenable and revoke wit
   await userEvent.click(
     within(member).getByRole("button", { name: "Отключить аккаунт" }),
   );
+  const confirmation = screen.getByRole("dialog", { name: /Отключить аккаунт/ });
+  await userEvent.click(within(confirmation).getByRole("button", { name: "Отключить доступ" }));
   await waitFor(() =>
     expect(
       within(member).getByRole("button", { name: "Включить аккаунт" }),

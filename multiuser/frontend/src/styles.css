@@ -410,7 +410,7 @@ small {
   color: var(--accent);
 }
 .sidebar .brand {
-  margin: 2px 14px 53px;
+  margin: 2px 14px 30px;
 }
 .workspace-label {
   font-size: 8px;
@@ -462,7 +462,7 @@ small {
   font-size: 13px;
   line-height: 1.6;
   font-weight: 600;
-  max-width: 150px;
+  margin-bottom: 8px;
 }
 .sidebar-template p {
   font-size: 11px;
@@ -507,7 +507,7 @@ small {
   display: flex;
   gap: 24px;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   padding: 0 46px;
   border-bottom: 1px solid var(--border);
   font-size: 11px;
@@ -1444,8 +1444,8 @@ small {
   padding: 47px 70px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  gap: 70px;
+  justify-content: center;
+  gap: 22px;
 }
 .login-intro .eyebrow {
   font-size: 9px;
@@ -1463,11 +1463,10 @@ small {
   color: var(--accent);
 }
 .login-description {
-  font-size: 13px;
+  font-size: clamp(16px, 2.3vw, 26px);
   color: var(--muted);
-  line-height: 1.9;
-  max-width: 320px;
-  margin-top: 27px;
+  line-height: 1.45;
+  max-width: 28ch;
 }
 .login-footnote {
   font-size: 10px;
@@ -1492,7 +1491,7 @@ small {
   font-size: 9px;
   margin-bottom: -11px;
 }
-.login-form h2 {
+.login-form h1 {
   font-family: Manrope, sans-serif;
   font-size: 28px;
   letter-spacing: -1px;
@@ -1718,9 +1717,6 @@ small {
   .login-intro h1 {
     font-size: 33px;
   }
-  .main-footer > span:last-child {
-    display: none;
-  }
 }
 @media (max-width: 620px) {
   .workspace {
@@ -1748,25 +1744,22 @@ small {
     display: none;
   }
   .sidebar nav {
-    display: flex;
-    gap: 4px;
-    max-width: 100%;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-  .sidebar nav::-webkit-scrollbar {
-    display: none;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
   }
   .nav-item {
-    flex: 0 0 auto;
-    width: auto;
+    min-width: 0;
+    min-height: 44px;
     font-size: 10px;
     justify-content: center;
     gap: 6px;
     padding: 11px 5px;
-    white-space: nowrap;
+    text-align: center;
+    line-height: 1.25;
   }
   .nav-item svg {
+    flex: 0 0 15px;
     width: 15px;
     height: 15px;
   }
@@ -1861,8 +1854,8 @@ small {
     flex-direction: column;
   }
   .login-intro {
-    padding: 28px;
-    gap: 38px;
+    padding: 24px 28px;
+    gap: 10px;
   }
   .login-intro h1 {
     font-size: 34px;
@@ -1872,8 +1865,7 @@ small {
     display: none;
   }
   .login-description {
-    font-size: 12px;
-    margin-top: 18px;
+    font-size: 13px;
     max-width: 100%;
   }
   .login-form-wrap {
@@ -1887,7 +1879,7 @@ small {
   .login-form > .round-icon {
     display: none;
   }
-  .login-form h2 {
+  .login-form h1 {
     font-size: 25px;
   }
   .facts-editor,
@@ -3134,15 +3126,18 @@ textarea::placeholder {
   font-weight: 600;
 }
 .queue-summary {
-  padding: 14px 18px;
-  margin-bottom: 20px;
-  background: var(--paper);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  padding: 0;
+  margin-bottom: 14px;
   color: var(--text);
 }
 .queue-summary > span {
   font-weight: 600;
+  padding: 5px 9px;
+  border-radius: 12px;
+  background: var(--surface-selected);
+}
+.queue-summary > .text-button {
+  min-height: 32px;
 }
 .setup-guide {
   background: var(--surface-selected);
@@ -3374,15 +3369,12 @@ textarea::placeholder {
 }
 
 .criteria-save-notice {
-  position: fixed;
-  inset-block-start: 1rem;
-  inset-inline-end: 1rem;
-  max-inline-size: min(24rem, calc(100vw - 2rem));
+  flex-basis: 100%;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.75rem 1rem;
+  padding: 0.5rem 0.75rem;
   background: var(--paper);
   color: var(--ink);
   border: 1px solid var(--border);
@@ -3467,11 +3459,12 @@ textarea::placeholder {
 .manual-job-dialog {
   width: min(46rem, calc(100% - 2rem));
 }
-.workspace-dialog form {
+.workspace-dialog form,
+.workspace-dialog .confirmation-content {
   display: grid;
   gap: 16px;
 }
-.workspace-dialog form h2 {
+.workspace-dialog h2 {
   font-size: clamp(20px, 4vw, 26px);
   line-height: 1.25;
 }
@@ -3502,6 +3495,18 @@ textarea::placeholder {
 .source-workspace > p {
   color: var(--muted);
   line-height: 1.6;
+}
+.source-jump {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  color: var(--accent-dark);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-size: 13px;
+}
+#personal-sources {
+  scroll-margin-top: 24px;
 }
 .source-workspace > h2 {
   margin: 24px 0 12px;
@@ -3669,6 +3674,73 @@ textarea::placeholder {
 .job-actions {
   gap: 8px;
   padding-block: 18px 14px;
+}
+.job-actions .vacancy-link {
+  margin-inline-start: 0;
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
+}
+.job-actions .vacancy-link:hover {
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+}
+.status-badge {
+  justify-self: start;
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px 9px;
+  border-radius: 12px;
+  color: var(--muted);
+  background: var(--surface-subtle);
+}
+.status-badge[data-state="active"] {
+  color: var(--success);
+  background: var(--success-surface);
+}
+.status-badge[data-state="pending"] {
+  color: var(--warning);
+  background: var(--warning-surface);
+}
+.template-format-note summary {
+  color: var(--accent-dark);
+  cursor: pointer;
+  padding-block: 6px;
+}
+.template-format-note p {
+  margin-top: 6px;
+  max-width: 70ch;
+}
+.chat-form label {
+  color: var(--text);
+  font-weight: 600;
+}
+.usage-summary,
+.diagnostics-summary {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border-radius: 14px;
+  background: var(--surface-subtle);
+}
+.diagnostics-summary {
+  margin-top: 14px;
+}
+@media (max-width: 620px) {
+  .sidebar nav {
+    margin-inline: -3px;
+  }
+  .sidebar nav .nav-item {
+    font-size: clamp(10px, 2.8vw, 12px);
+    padding: 6px 4px;
+    gap: 3px;
+  }
+}
+@media (max-width: 359px) {
+  .sidebar nav .nav-item {
+    flex-direction: column;
+    gap: 4px;
+  }
 }
 .job-footer {
   padding-block: 10px 0;

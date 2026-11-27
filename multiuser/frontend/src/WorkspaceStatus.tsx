@@ -26,9 +26,11 @@ export type SetupPage = "criteria" | "sources" | "profile" | "usage";
 export function WorkspaceStatus({
   revision,
   onNavigate,
+  showSetup = true,
 }: {
   revision: number;
   onNavigate: (page: SetupPage) => void;
+  showSetup?: boolean;
 }) {
   const [summary, setSummary] = useState<WorkspaceSummary | null>(null);
   const [error, setError] = useState("");
@@ -98,7 +100,7 @@ export function WorkspaceStatus({
               OpenAI запросил паузу. Задания ожидают доступности API.
             </Notice>
           )}
-          {!complete && (
+          {showSetup && !complete && (
             <section className="setup-guide" aria-labelledby="setup-heading">
               <h2 id="setup-heading">Подготовьте личный кабинет</h2>
               <p>

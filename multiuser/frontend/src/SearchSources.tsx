@@ -143,9 +143,11 @@ export function SearchSources({
     element?.focus();
     element?.scrollIntoView?.({ block: "nearest" });
   }
+  const personalSources = sources.items.filter((source) => !(source.builtin ?? aggregateKinds.includes(source.kind)));
   return (
     <section className="source-workspace" aria-label="Источники">
       <p>Источник — сайт вакансий, карьерная доска компании или публичный канал, откуда сервис берёт объявления.</p>
+      <a className="source-jump" href="#personal-sources">К моим источникам</a>
       <h2>Встроенные</h2>
       {builtins.some((type) => !connected(type)) && (
         <button type="button" className="button secondary" onClick={() => setAction("recommend")}>Подключить рекомендованный набор</button>
@@ -157,7 +159,9 @@ export function SearchSources({
             <li id={`source-${type.kind}`} key={type.kind} tabIndex={-1}>
               <h3>{type.name}</h3>
               <p>{type.description ?? type.limitations}</p>
-              <p>{source ? source.enabled ? "Включён" : "Выключен" : "Ещё не подключён"}</p>
+              <p className="status-badge" data-state={source?.enabled ? "active" : "disabled"}>
+                {source ? source.enabled ? "Включён" : "Выключен" : "Ещё не подключён"}
+              </p>
               <div className="source-actions">
                 <button type="button" className="button secondary" disabled={busy}
                   aria-label={`${source?.enabled ? "Выключить" : "Включить"} ${type.name}`}
@@ -173,11 +177,11 @@ export function SearchSources({
           );
         })}
       </ul>
-      <h2>Мои источники</h2>
-      {!sources.items.length && <p>Источники пока не добавлены.</p>}
+      <h2 id="personal-sources" tabIndex={-1}>Мои источники</h2>
+      {!personalSources.length && <p>Источники пока не добавлены.</p>}
       <p>Кнопка «Проверить» запрашивает пробный ответ и показывает доступность площадки.</p>
       <ul className="source-list">
-        {sources.items.filter((source) => !(source.builtin ?? aggregateKinds.includes(source.kind))).map((source) => (
+        {personalSources.map((source) => (
           <li key={source.id}>
             <h3>{source.name}</h3>
             <p>{source.limitations}</p>

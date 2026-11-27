@@ -93,6 +93,7 @@ export type Job = {
   } | null;
   title: string;
   company: string;
+  source?: string;
   russian_company?: boolean;
   location: string;
   url: string;
