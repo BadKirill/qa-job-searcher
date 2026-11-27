@@ -18,7 +18,7 @@ import { server } from "./fixtures";
 
 const examples = {
   developer: { ...emptySearch, role_keywords: ["backend engineer"] },
-  designer: { ...emptySearch, role_keywords: ["product designer", "ux designer"], skill_keywords: ["figma"] },
+  designer: { ...emptySearch, role_keywords: ["product designer", "ux designer"], source_queries: ["product designer"], focus_qa_keywords: ["design systems"], skill_keywords: ["figma", "figjam", "prototyping"] },
   qa: { ...emptySearch, role_keywords: ["qa engineer"], qa_title_fallback: true },
 };
 
@@ -221,7 +221,7 @@ test("fresh personal workspace has no inherited settings and saves a universal p
   expect(
     screen.queryByLabelText("Учитывать дополнительные QA-названия"),
   ).not.toBeInTheDocument();
-  await user.selectOptions(screen.getByLabelText("Пример профиля"), "qa");
+  await user.selectOptions(screen.getByLabelText("Шаблон поиска"), "qa");
   for (const name of [
     "Гибрид",
     "В офисе",
@@ -256,11 +256,12 @@ test("examples fill a draft and history loads a saved revision without writing",
   const user = userEvent.setup();
   const { unmount } = render(<SearchSettings />);
   await ready();
-  expect(screen.getByRole("button", { name: "Подставить пример" })).toBeDisabled();
-  await user.selectOptions(screen.getByLabelText("Пример профиля"), "designer");
-  await user.click(screen.getByRole("button", { name: "Подставить пример" }));
+  expect(screen.getByRole("button", { name: "Применить шаблон" })).toBeDisabled();
+  await user.selectOptions(screen.getByLabelText("Шаблон поиска"), "designer");
+  await user.click(screen.getByRole("button", { name: "Применить шаблон" }));
   expect(screen.getByLabelText("Названия ролей и синонимы")).toHaveValue("product designer, ux designer");
-  expect(screen.getByLabelText("Навыки")).toHaveValue("figma");
+  expect(screen.getByLabelText("Навыки и инструменты")).toHaveValue("figma, figjam, prototyping");
+  expect(screen.getByLabelText("Приоритетные направления")).toHaveValue("design systems");
   expect(screen.getByText(/Есть несохранённые изменения/)).toBeVisible();
   expect(api.calls.some((call) => call.body)).toBe(false);
   expect(api.state.sources.items).toHaveLength(0);
@@ -269,7 +270,7 @@ test("examples fill a draft and history loads a saved revision without writing",
   unmount();
   render(<SearchSettings />);
   await ready();
-  expect(screen.getByLabelText("Пример профиля")).toHaveValue("");
+  expect(screen.getByLabelText("Шаблон поиска")).toHaveValue("");
   const roles = screen.getByLabelText("Названия ролей и синонимы");
   expect(roles).toHaveValue("product designer, ux designer");
   await user.clear(roles);
@@ -281,7 +282,7 @@ test("examples fill a draft and history loads a saved revision without writing",
   await user.click(await screen.findByRole("button", { name: "Повторить загрузку версий" }));
   const previous = await screen.findByText(/ревизия 1/);
   await user.click(previous);
-  await user.click(within(previous.closest("details")!).getByRole("button", { name: "Загрузить в форму" }));
+  await user.click(within(previous.closest("details")!).getByRole("button", { name: "Редактировать эту версию" }));
   expect(roles).toHaveValue("product designer, ux designer");
   expect(api.calls.filter((call) => call.body?.profile)).toHaveLength(2);
 });
@@ -611,14 +612,21 @@ test("legacy location review keeps the old values and field errors focus the inv
 });
 
 test("a second example offers to keep the dirty editor and replaces it only after explicit confirmation", async () => {
-  preferencesServer();
+  const api = preferencesServer({ search_profile: {
+    configured: true, version: 4, editor_version: 8, variant_id: "4", name: "Мои критерии",
+    profile: { ...emptySearch, role_keywords: ["backend engineer"], working_languages: ["en"],
+      workplace_types: ["hybrid"], candidate_locations: ["belgrade"], min_score: 53,
+      excluded_title_keywords: ["lead"], preferred_seniority: ["senior"], domain_keywords: ["fintech"],
+      exclude_entry_level: true, allow_unknown_remote_location: true },
+  } });
   const user = userEvent.setup();
   render(<SearchSettings />);
   await ready();
   const roles = screen.getByLabelText("Названия ролей и синонимы");
+  await user.clear(roles);
   await user.type(roles, "My draft");
-  await user.selectOptions(screen.getByLabelText("Пример профиля"), "designer");
-  const apply = screen.getByRole("button", { name: "Подставить пример" });
+  await user.selectOptions(screen.getByLabelText("Шаблон поиска"), "designer");
+  const apply = screen.getByRole("button", { name: "Применить шаблон" });
   await user.click(apply);
   const dialog = screen.getByRole("dialog", { name: "Заменить несохранённые поля?" });
   await user.click(within(dialog).getByRole("button", { name: "Оставить черновик" }));
@@ -626,4 +634,16 @@ test("a second example offers to keep the dirty editor and replaces it only afte
   await user.click(apply);
   await user.click(within(dialog).getByRole("button", { name: /^Заменить$/ }));
   expect(roles).toHaveValue("product designer, ux designer");
+  expect(screen.getByText("В редакторе · Мои критерии")).toBeVisible();
+  expect(api.calls.some((call) => call.body)).toBe(false);
+  await user.click(screen.getByRole("button", { name: /^Сохранить$/ }));
+  expect(api.calls.find((call) => call.path === "/api/search-profile")?.body).toMatchObject({
+    variant_id: "4", expected_version: 4, expected_editor_version: 8, create: false,
+    profile: {
+      source_queries: ["product designer"], working_languages: ["en"], workplace_types: ["hybrid"],
+      candidate_locations: ["belgrade"], min_score: 53, excluded_title_keywords: ["lead"],
+      preferred_seniority: ["senior"], domain_keywords: ["fintech"], exclude_entry_level: true,
+      allow_unknown_remote_location: true,
+    },
+  });
 });

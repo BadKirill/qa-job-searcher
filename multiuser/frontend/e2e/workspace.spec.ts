@@ -25,7 +25,7 @@ async function signIn(page: Page) {
     await page.getByRole("button", { name: "Войти", exact: true }).click();
   }
   await expect(
-    page.getByRole("heading", { name: "Подходящие вакансии." }),
+    page.getByRole("heading", { name: "Подходящие вакансии" }),
   ).toBeVisible();
 }
 

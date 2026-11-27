@@ -10,6 +10,7 @@ from qa_job_bot.posting_details import (
     known_posting_link,
     last_confirmed_posting,
     posting_observation_key,
+    remote_com_posting_key,
 )
 from qa_job_bot.web_store import ACTIVE_STATUSES, StoreError, digest
 
@@ -172,8 +173,13 @@ class ManualJobs(OwnedRepository):
             previous = cache.get(posting_observation_key(job_id, key), {})
             due = previous.get("auto_after", previous.get("next_at", 0))
             url = last_confirmed_posting(previous).get("url") or job.get("url")
-            if due <= now and scope not in pending and known_posting_link(url):
-                candidates.append((due, scope, posting_job_payload(job_id, job, previous)))
+            if (
+                due <= now
+                and scope not in pending
+                and (known_posting_link(url) or remote_com_posting_key(url))
+            ):
+                payload = posting_job_payload(job_id, job, previous)
+                candidates.append((due, scope, {**payload, "automatic": True}))
         for _, scope, payload in sorted(candidates, key=lambda item: item[0])[:remaining]:
             self.enqueue_in(
                 connection,

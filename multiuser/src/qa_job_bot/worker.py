@@ -32,6 +32,8 @@ from qa_job_bot.posting_details import (
     check_result,
     fetch_posting,
     known_posting_link,
+    remote_com_original,
+    remote_com_posting_key,
     same_posting,
 )
 from qa_job_bot.runtime_limits import QuotaExceeded, RuntimeLimits
@@ -189,8 +191,16 @@ class Worker:
         )
         url = payload.get("original_url") or job.get("url") or ""
         direct = known_posting_link(url)
-        result = await fetch_posting(url, factory)
-        if not payload["manual"] and not direct and result.status == "unconfirmed":
+        remote_key = remote_com_posting_key(url)
+        if not direct and remote_key:
+            direct = await remote_com_original(remote_key, factory)
+        result = await fetch_posting(direct.url if direct else url, factory)
+        if (
+            not payload["manual"]
+            and not payload.get("automatic")
+            and not direct
+            and result.status == "unconfirmed"
+        ):
             result = await self.find_original_posting(task, job, factory)
         self.store.complete_posting_check(task, self.id, result)
 

@@ -127,6 +127,7 @@ export type JobPage = {
   last_search_at?: string | null;
   search_run?: SearchRun | null;
   latest_run_id?: string | null;
+  schedule?: { enabled: boolean; next_run_at: number } | null;
 };
 export type Message = {
   id: string;

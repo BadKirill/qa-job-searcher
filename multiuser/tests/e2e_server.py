@@ -238,6 +238,17 @@ def fixture_source_client(include_qa=False, **kwargs):
     async def response(request):
         host = request.headers["host"]
         token = request.url.path.rsplit("/", 1)[-1]
+        if host == "talent-api.remote.com" and "/stage-feedback/" in request.url.path:
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "company_profile": {"slug": "stage-feedback"},
+                        "slug": token,
+                        "apply_url": f"https://job-boards.greenhouse.io/stage-feedback/jobs/{token}",
+                    }
+                },
+            )
         if host == "boards-api.greenhouse.io" and "/stage-feedback/" in request.url.path:
             if token == "101":
                 return httpx.Response(404)
@@ -290,6 +301,29 @@ def fixture_source_client(include_qa=False, **kwargs):
                         "descriptionPlain": text or "Build reliable services.",
                     }
                     for index, (label, (location, text)) in enumerate(cases.items())
+                ],
+            )
+        if host.endswith("lever.co") and token == "stage-workplace-places":
+            cases = [
+                ("EU remote", "Remote — EU only", "remote"),
+                ("Germany remote", "Remote — Germany only", "remote"),
+                ("US remote", "Remote — US only", "remote"),
+                ("Tbilisi office", "Tbilisi, Georgia", "on-site"),
+                ("Berlin office", "Berlin, Germany", "on-site"),
+                ("Berlin hybrid", "Berlin, Germany", "hybrid"),
+            ]
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": str(index),
+                        "text": f"Backend Engineer · {label}",
+                        "categories": {"location": location},
+                        "workplaceType": mode,
+                        "hostedUrl": f"https://example.com/workplace/{index}",
+                        "descriptionPlain": "Develop reliable backend services.",
+                    }
+                    for index, (label, location, mode) in enumerate(cases)
                 ],
             )
         if "lever.co" in host and token in {
@@ -349,7 +383,11 @@ def fixture_source_client(include_qa=False, **kwargs):
                             "title": f"Platform Specialist · {label}",
                             "company_name": "Example Company",
                             "candidate_required_location": "Worldwide",
-                            "url": f"https://job-boards.greenhouse.io/stage-feedback/jobs/{posting_id}",
+                            "url": (
+                                f"https://remote.com/jobs/stage-feedback/{posting_id}"
+                                if posting_id != 102
+                                else f"https://job-boards.greenhouse.io/stage-feedback/jobs/{posting_id}"
+                            ),
                             "description": "Work on platform reliability.",
                         }
                         for posting_id, label in ((100, "Open"), (101, "Closed"), (102, "Unknown"))

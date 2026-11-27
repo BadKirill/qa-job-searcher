@@ -260,7 +260,11 @@ def geography_decision(job, profile):
     candidates = (
         identified_places(profile.candidate_locations)
         if profile.remote_place_ids is None
-        else set(profile.remote_place_ids)
+        else {
+            location
+            for place in profile.remote_place_ids
+            for location in REGION_MEMBERS.get(place, (place,))
+        }
     )
     offices = {
         "hybrid": profile.hybrid_place_ids,

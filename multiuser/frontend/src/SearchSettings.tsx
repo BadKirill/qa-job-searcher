@@ -70,16 +70,16 @@ const fields = [
   ["preferred_seniority", "Предпочтительные уровни", "совпадения повышают оценку, например middle, senior"],
   ["focus_qa_keywords", "Приоритетные направления", "совпадения повышают оценку, например design systems, ux research"],
   ["domain_keywords", "Отрасли", "совпадения повышают оценку, например fintech, education"],
-  ["skill_keywords", "Навыки", "совпадения повышают оценку, например figma, prototyping"],
+  ["skill_keywords", "Навыки и инструменты", "совпадения повышают оценку, например figma, prototyping"],
   ["allowed_locations", "Предпочтения по локации вакансии", "если пусто, география не ограничена этим списком"],
   ["blocked_locations", "Исключения по локации вакансии", "оставьте пустым, если исключений нет"],
   ["candidate_locations", "Откуда могу работать", "ваши страны и города для проверки ограничений работодателя"],
   ["hybrid_locations", "Города для гибридной работы", "укажите города, где готовы приезжать в офис, например berlin"],
 ] as const;
 const workplace = [
-  ["remote", "Удалённо", "работа вне офиса"],
-  ["hybrid", "Гибрид", "часть времени в офисе"],
-  ["on-site", "В офисе", "работа на месте"],
+  ["remote", "Удалённо", "работа вне офиса", "remote_place_ids", "Откуда могу работать удалённо", "country,city,region,state"],
+  ["hybrid", "Гибрид", "часть времени в офисе", "hybrid_place_ids", "Где готов ездить в офис при гибриде", "country,city"],
+  ["on-site", "В офисе", "работа на месте", "office_place_ids", "Где готов работать в офисе", "country,city"],
 ] as const;
 const workingLanguages = [
   ["ru", "Русскоязычные"],
@@ -114,11 +114,7 @@ export const emptySearch: SearchSpec = {
   min_score: 35,
   matching_mode: "universal",
 };
-const labels: Record<string, string> = {
-  qa: "QA",
-  developer: "Разработка",
-  designer: "Дизайн",
-};
+type SearchTemplates = { items: Record<string, SearchSpec>; labels?: Record<string, string> };
 function FieldHint({ id, children }: { id: string; children: string }) {
   return <small className="field-hint" id={id}>({children})</small>;
 }
@@ -186,9 +182,6 @@ type ProfileVersion = {
 type VariantAction = "activate" | "rename" | "delete";
 
 const geographicFields = [
-  ["remote_place_ids", "Откуда могу работать удалённо", "country,city,region,state"],
-  ["hybrid_place_ids", "Где готов ездить в офис при гибриде", "country,city"],
-  ["office_place_ids", "Где готов работать в офисе", "country,city"],
   ["preferred_place_ids", "Предпочтения по локации вакансии", "country,city,region,state"],
   ["excluded_place_ids", "Исключения по локации вакансии", "country,city,region,state"],
 ] as const;
@@ -246,8 +239,9 @@ function ProfileHistory({ onLoad, onAction }: {
               {name ?? `Версия ${version}`}{active ? " · используется в поиске" : ""}
               {created_at && <small> · ревизия {version} · {formatCreatedAt(created_at)}</small>}
             </summary>
+            <p className="version-hint">Откройте критерии этой версии для правок или переключите поиск на неё.</p>
             <div className="source-actions">
-              <button type="button" className="button secondary" onClick={() => onLoad(item)}>Загрузить в форму</button>
+              <button type="button" className="button secondary" onClick={() => onLoad(item)}>Редактировать эту версию</button>
               <button type="button" className="button secondary" disabled={active}
                 onClick={() => onAction(item, "activate")}>Использовать в поиске</button>
               <button type="button" className="button secondary"
@@ -257,10 +251,10 @@ function ProfileHistory({ onLoad, onAction }: {
                 onClick={() => onAction(item, "delete")}>Удалить вариант</button>
             </div>
             <dl>
-              {fields.map(([field, label]) => (
+              {fields.filter(([field]) => profile[field]?.length).map(([field, label]) => (
                 <div key={field}>
                   <dt>{label}</dt>
-                  <dd>{profile[field]?.join(", ") || "Пусто"}</dd>
+                  <dd>{profile[field]?.join(", ")}</dd>
                 </div>
               ))}
               <div>
@@ -318,7 +312,7 @@ export function SearchSettings({
   };
   const [state, setState] = useState<Preferences | null>(null);
   const [types, setTypes] = useState<SourceType[]>([]);
-  const [presets, setPresets] = useState<Record<string, SearchSpec>>({});
+  const [presets, setPresets] = useState<SearchTemplates>({ items: {} });
   const [form, setForm] = useState<SearchSpec>(emptySearch);
   const [terms, setTerms] = useState<Record<string, string>>({});
   const [revision, setRevision] = useState(0);
@@ -374,7 +368,7 @@ export function SearchSettings({
       request<{ items: SourceType[] }>("/source-types", {
         signal: controller.signal,
       }),
-      request<{ items: Record<string, SearchSpec> }>("/search-presets", {
+      request<SearchTemplates>("/search-presets", {
         signal: controller.signal,
       }),
     ])
@@ -382,7 +376,7 @@ export function SearchSettings({
         if (controller.signal.aborted) return;
         receive(data);
         setTypes(catalog.items);
-        setPresets(examples.items);
+        setPresets(examples);
         setError("");
       })
       .catch((failure) => {
@@ -566,7 +560,7 @@ export function SearchSettings({
           </button>
         </Notice>
       )}
-      <dialog ref={dialog} aria-labelledby={`${historyId}-confirmation`}
+      <dialog ref={dialog} className="workspace-dialog" aria-labelledby={`${historyId}-confirmation`}
         onCancel={(event) => { event.preventDefault(); closeDialog(); }}>
         <form onSubmit={(event) => {
           event.preventDefault();
@@ -594,8 +588,7 @@ export function SearchSettings({
         <>
           {!state.search_profile.configured && (
             <Notice tone="info">
-              Профиль поиска ещё не настроен. Добавьте свои критерии и источники
-              или подставьте пример и сохраните критерии.
+              Профиль поиска ещё не настроен. Заполните критерии вручную или примените шаблон, затем сохраните критерии и подключите источники.
             </Notice>
           )}
           {page !== "sources" && (
@@ -631,34 +624,35 @@ export function SearchSettings({
                 </div>
               </details>
               <fieldset className="settings-presets" disabled={busy}>
-                <legend>Примеры для начала</legend>
-                <p>Пример заполняет критерии профессии. Проверьте места, где можете работать, перед сохранением.</p>
-                <SettingsSelect label="Пример профиля" hint="например, Дизайн подставит названия ролей и Figma"
+                <legend>Шаблоны поиска</legend>
+                <p>Шаблон подставляет названия ролей, запросы, направления, навыки и инструменты в текущий черновик. Чтобы записать изменения, нажмите «Сохранить» внизу.</p>
+                <SettingsSelect label="Шаблон поиска" hint="выберите профессию или направление"
                   value={preset} onChange={(event) => setPresetChoice(event.target.value)}>
-                  <option value="">Выберите пример</option>
-                  {Object.keys(presets).map((id) => <option key={id} value={id}>{labels[id] ?? id}</option>)}
+                  <option value="">Выберите шаблон</option>
+                  {Object.keys(presets.items).map((id) => <option key={id} value={id}>{presets.labels?.[id] ?? id}</option>)}
                 </SettingsSelect>
-                <button type="button" className="button secondary" disabled={!preset}
+                <button type="button" className="button secondary" disabled={!presets.items[preset]}
                   onClick={() => replaceIfConfirmed(() => {
-                    const example = presets[preset];
-                    const places = Object.fromEntries(geographicFields.map(([field]) => [field, form[field]]));
-                    loadDraft({
-                      ...example, ...places, availability: form.availability,
-                      candidate_locations: form.candidate_locations, hybrid_locations: form.hybrid_locations,
-                      allowed_locations: form.allowed_locations, blocked_locations: form.blocked_locations,
-                      workplace_types: form.workplace_types,
-                    }, false);
+                    const example = presets.items[preset];
+                    setForm((current) => ({ ...current, qa_title_fallback: example.qa_title_fallback }));
                     setTerms((current) => ({
                       ...current,
-                      ...Object.fromEntries(["candidate_locations", "hybrid_locations", "allowed_locations", "blocked_locations"]
-                        .map((field) => [field, terms[field] ?? ""])),
+                      role_keywords: example.role_keywords.join(", "),
+                      source_queries: example.source_queries.join(", "),
+                      focus_qa_keywords: example.focus_qa_keywords.join(", "),
+                      skill_keywords: example.skill_keywords.join(", "),
                     }));
-                    setCriteriaNotice(`Подставлен пример · ${labels[preset] ?? preset}`);
+                    setCriteriaNotice(`Шаблон применён к черновику · ${presets.labels?.[preset] ?? preset}`);
                   })}>
-                  Подставить пример
+                  Применить шаблон
                 </button>
               </fieldset>
-              <form ref={criteriaForm} onSubmit={(event) => { event.preventDefault(); void saveProfile(); }}>
+              <form ref={criteriaForm}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.nativeEvent.isComposing && event.target instanceof HTMLInputElement
+                    && ["text", "number", "time"].includes(event.target.type)) event.preventDefault();
+                }}
+                onSubmit={(event) => { event.preventDefault(); void saveProfile(); }}>
                 <fieldset className="criteria-fields" disabled={busy}>
                   <legend>Критерии поиска</legend>
                   <p>В редакторе · {edited?.name ?? "Новый вариант"}</p>
@@ -676,7 +670,39 @@ export function SearchSettings({
                       onChange={(event) => setTerms({ ...terms, source_queries: event.target.value })} />
                   </details>
                   <fieldset>
-                    <legend>Где и в каком формате</legend>
+                    <legend>Формат работы по локациям</legend>
+                    <p className="muted">Укажите места для нужных форматов. Выбор места включает формат. Например, удалённо из ЕС, а в офисе в Тбилиси.</p>
+                    <div className="workplace-options">
+                      {workplace.map(([mode, label, hint, field, placeLabel, kinds]) => {
+                        const places = form[field] ?? [];
+                        const enabled = form.workplace_types.includes(mode) || places.length > 0;
+                        return (
+                          <div className="workplace-option" key={mode}>
+                            <CriteriaInput label={label} hint={hint} type="checkbox" checked={enabled}
+                              onChange={(event) => {
+                                const checked = event.target.checked;
+                                setForm({
+                                  ...form,
+                                  workplace_types: checked
+                                    ? [...form.workplace_types, mode]
+                                    : form.workplace_types.filter((value) => value !== mode),
+                                  [field]: checked && mode === "remote" ? null : [],
+                                });
+                              }} />
+                            <PlacePicker label={placeLabel} kinds={kinds} values={places}
+                              onChange={(values) => setForm({
+                                ...form,
+                                [field]: mode === "remote" && !values.length ? null : values,
+                                workplace_types: values.length && !form.workplace_types.includes(mode)
+                                  ? [...form.workplace_types, mode] : form.workplace_types,
+                              })} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </fieldset>
+                  <fieldset>
+                    <legend>География вакансии и рабочие часы</legend>
                     {geographicFields.map(([field, label, kinds]) => (
                       <PlacePicker key={field} label={label} kinds={kinds} values={form[field] ?? []}
                         onChange={(values) => setForm({ ...form, [field]: values })} />
@@ -722,24 +748,6 @@ export function SearchSettings({
                       )}
                     </details>
                   </fieldset>
-                  <p className="muted">Формат работы <small className="field-hint">(выберите хотя бы один)</small></p>
-                  {workplace.map(([mode, label, hint]) => (
-                    <CriteriaInput
-                      key={mode}
-                      label={label}
-                      hint={hint}
-                      type="checkbox"
-                      checked={form.workplace_types.includes(mode)}
-                      onChange={(event) =>
-                        setForm({
-                          ...form,
-                          workplace_types: event.target.checked
-                            ? [...form.workplace_types, mode]
-                            : form.workplace_types.filter((value) => value !== mode),
-                        })
-                      }
-                    />
-                  ))}
                   <p className="muted" id={`${historyId}-language`}>
                     Рабочий язык <small className="field-hint">(без выбора — любой. Когда язык команды не указан, учитываем язык публикации)</small>
                   </p>

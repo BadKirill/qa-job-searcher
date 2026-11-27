@@ -35,7 +35,7 @@ export async function expectLayoutIntegrity(page: Page) {
       failures.push({ rule, element: identify(element), detail });
     };
     const panels = Array.from(document.querySelectorAll<HTMLElement>(
-      ".job-card, .task-status, .template-summary, .facts-editor, .chat-panel, .pdf-reference, .draft-item, .source-list > li, .account-members > li, .account-settings form, .search-settings fieldset, .runtime-settings form, .notice, .confirmation-modal, .setup-guide, .setup-guide li, .message",
+      ".job-card, .task-status, .template-summary, .facts-editor, .chat-panel, .pdf-reference, .draft-item, .source-list > li, .account-members > li, .account-settings form, .search-settings fieldset, .runtime-settings form, .notice, .confirmation-modal, .workspace-dialog, .source-connect, .source-import, .setup-guide, .setup-guide li, .message",
     )).filter(visible);
     for (const panel of panels) {
       if (panel.scrollWidth > panel.clientWidth + 1) {
@@ -48,7 +48,7 @@ export async function expectLayoutIntegrity(page: Page) {
     for (const control of controls) {
       const bounds = control.getBoundingClientRect();
       const panel = control.closest<HTMLElement>(
-        ".task-status, .facts-editor, .chat-panel, .pdf-reference, .source-list > li, .account-members > li, .account-settings form, .search-settings fieldset, .runtime-settings form, .notice, .confirmation-modal, .setup-guide li, .job-card",
+        ".task-status, .facts-editor, .chat-panel, .pdf-reference, .source-list > li, .account-members > li, .account-settings form, .search-settings fieldset, .runtime-settings form, .notice, .confirmation-modal, .workspace-dialog, .source-connect, .source-import, .setup-guide li, .job-card",
       );
       if (panel) {
         const parent = panel.getBoundingClientRect();

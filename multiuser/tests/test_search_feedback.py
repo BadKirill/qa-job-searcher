@@ -15,7 +15,13 @@ from qa_job_bot.matching import match_job
 from qa_job_bot.models import Job
 from qa_job_bot.openai_config import OpenAISettings
 from qa_job_bot.pg_store import PostgresStore
-from qa_job_bot.posting_details import PublicPostingSearch, fetch_posting, same_posting
+from qa_job_bot.posting_details import (
+    PublicPostingSearch,
+    fetch_posting,
+    remote_com_original,
+    remote_com_posting_key,
+    same_posting,
+)
 from qa_job_bot.posting_summary import posting_summary
 from qa_job_bot.search_models import SearchSpec
 from qa_job_bot.source_http import SourceClient
@@ -25,6 +31,7 @@ from qa_job_bot.web_store import StoreError
 from qa_job_bot.work_time import display_work_time
 
 ORIGINAL = "https://job-boards.greenhouse.io/example/jobs/123"
+REMOTE_LISTING = "https://remote.com/jobs/example-labs/engineer-123"
 ORIGINAL_TEXT = (
     "Build product features using Python and maintain reliable application services. "
     "Own the event pipeline for school enrollment and automate its reconciliation tests."
@@ -64,6 +71,24 @@ def criteria(**fields):
         (
             {"location": "Remote — EU only"},
             {"remote_place_ids": ["country:DE"]},
+            "allowed",
+            "hiring_location_match",
+        ),
+        (
+            {"location": "Remote — Germany only"},
+            {"remote_place_ids": ["region:eu"]},
+            "allowed",
+            "hiring_location_match",
+        ),
+        (
+            {"location": "Remote — US only"},
+            {"remote_place_ids": ["region:eu"]},
+            "blocked",
+            "hiring_location_mismatch",
+        ),
+        (
+            {"location": "Remote — Norway only"},
+            {"remote_place_ids": ["region:eea"]},
             "allowed",
             "hiring_location_match",
         ),
@@ -146,6 +171,7 @@ def test_geography_decision_and_explanation(job_data, settings, status, reason):
 
 
 def test_place_choices_disambiguate_and_never_rewrite_old_values():
+    assert "country:DE" in {item["id"] for item in find_places("герм", ("country",))["items"]}
     for term in ("me", "ме"):
         assert "MENA · Ближний Восток и Северная Африка" in {
             item["label"] for item in find_places(term)["items"]
@@ -415,6 +441,51 @@ async def test_ats_contracts_keep_declared_and_unconfirmed_states_separate(statu
         assert not same_posting({**public_job, "url": ORIGINAL.replace("/123", "/456")}, result.job)
 
 
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        (REMOTE_LISTING, ("example-labs", "engineer-123")),
+        (REMOTE_LISTING + "?ref=search", ("example-labs", "engineer-123")),
+        (REMOTE_LISTING.replace("remote.com", "remote.com.example.net"), None),
+        (REMOTE_LISTING.replace("engineer-123", "%2Fengineer-123"), None),
+        (REMOTE_LISTING.replace("/jobs/", "/companies/"), None),
+        ("https://remote.com/jobs/example-labs", None),
+        (REMOTE_LISTING + "!", None),
+    ],
+)
+def test_remote_posting_key_matches_the_public_listing_route(url, expected):
+    assert remote_com_posting_key(url) == expected
+
+
+@pytest.mark.parametrize(
+    ("status", "company", "slug", "url", "found"),
+    [
+        (200, "example-labs", "engineer-123", ORIGINAL, True),
+        (200, "different", "engineer-123", ORIGINAL, False),
+        (200, "example-labs", "engineer-124", ORIGINAL, False),
+        (200, "example-labs", "engineer-123", "https://example.net", False),
+        (200, "example-labs", "engineer-123", None, False),
+        (429, "example-labs", "engineer-123", ORIGINAL, False),
+    ],
+)
+async def test_remote_original_checks_both_identifiers_and_requires_an_ats_link(
+    status, company, slug, url, found
+):
+    def handler(request):
+        assert request.url.host == "talent-api.remote.com"
+        assert request.url.path == "/api/v1/public/jobs/example-labs/engineer-123"
+        return httpx.Response(
+            status,
+            json={"data": {"company_profile": {"slug": company}, "slug": slug, "apply_url": url}},
+        )
+
+    result = await remote_com_original(
+        remote_com_posting_key(REMOTE_LISTING),
+        lambda: SourceClient(transport=httpx.MockTransport(handler)),
+    )
+    assert result == (posting_link(ORIGINAL) if found else None)
+
+
 def test_manual_add_preserves_owner_context_url_deduplication_and_revisions(api_world):
     admin, member, app, _, member_id = api_world
     store = PostgresStore(app.state.database, member_id)
@@ -552,10 +623,11 @@ def test_work_time_prefers_explicit_hours_and_preserves_a_standalone_zone():
     assert zone_only["zone"] == "UTC+01:00" and zone_only["needs_review"]
 
 
-def test_automatic_posting_checks_are_bounded_and_require_an_ats_link(pg_store):
+def test_automatic_posting_checks_are_bounded_and_require_a_resolvable_link(pg_store):
     configure(pg_store)
     search = started(pg_store)
-    jobs = [vacancy(source_id=str(index), url=f"{ORIGINAL}{index}") for index in range(12)]
+    jobs = [vacancy(source_id="remote", url=REMOTE_LISTING)]
+    jobs.extend(vacancy(source_id=str(index), url=f"{ORIGINAL}{index}") for index in range(12))
     jobs.append(
         vacancy(source_id="aggregator", url="https://remotive.com/remote-jobs/example-98745")
     )
@@ -567,6 +639,60 @@ def test_automatic_posting_checks_are_bounded_and_require_an_ats_link(pg_store):
         != "aggregator"
         for task in checks
     )
+
+
+@pytest.mark.parametrize("status", [200, 404, 503])
+async def test_remote_original_enriches_or_hides_the_live_card(pg_store, tmp_path, status):
+    from qa_job_bot.search_pipeline import PersonalSearchPipeline
+    from qa_job_bot.web_security import WebSettings
+    from qa_job_bot.worker import Worker
+
+    configure(pg_store)
+    search = started(pg_store)
+    job = vacancy(
+        url=REMOTE_LISTING, description="Build with Python", description_quality="fragment"
+    )
+    assert pg_store.complete_search(search, "worker", [batch(search, [job])])
+    item = pg_store.list_jobs("active", 1)["items"][0]
+    checked_hosts = []
+
+    def handler(request):
+        checked_hosts.append(request.url.host)
+        if request.url.host == "talent-api.remote.com":
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "company_profile": {"slug": "example-labs"},
+                        "slug": "engineer-123",
+                        "apply_url": ORIGINAL,
+                    }
+                },
+            )
+        assert str(request.url).endswith("/example/jobs/123")
+        return httpx.Response(
+            status, json={"id": 123, "title": "Backend Engineer", "content": ORIGINAL_TEXT}
+        )
+
+    def factory():
+        return SourceClient(transport=httpx.MockTransport(handler))
+
+    worker = Worker(
+        pg_store, WebSettings(tmp_path), search_pipeline=PersonalSearchPipeline(factory)
+    )
+    task = pg_store.enqueue_posting_check(item["id"], "read-original")["task"]
+    assert await worker.once()
+    assert checked_hosts == ["talent-api.remote.com", "boards-api.greenhouse.io"]
+    live = pg_store.list_jobs("active", 1)["items"]
+    history = pg_store.list_jobs("active", 1, run_id=search["id"])["items"]
+    if status == 404:
+        assert not live and history[0]["posting"]["status"] == "closed"
+    elif status == 200:
+        assert live[0]["url"] == ORIGINAL and live[0]["description"] == ORIGINAL_TEXT
+    else:
+        assert live[0]["description"] == "Build with Python"
+        assert live[0]["posting"]["status"] == "unconfirmed"
+    assert pg_store.task(task["id"])["status"] == "ready"
 
 
 async def test_posting_worker_keeps_history_and_applied_during_close_and_reopen(

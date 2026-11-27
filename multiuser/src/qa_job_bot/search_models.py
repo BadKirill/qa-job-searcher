@@ -248,31 +248,231 @@ def universal_profile(data):
     ).model_dump()
 
 
-def search_presets():
-    qa = universal_profile(asdict(SearchProfile()))
-    developer = SearchSpec(
-        role_keywords=["backend engineer", "software engineer"],
-        skill_keywords=["python"],
-        allowed_locations=["worldwide", "europe"],
+def profession_template(label, roles, focus, skills, *, qa_title_fallback=False):
+    return label, SearchSpec(
+        role_keywords=roles,
+        source_queries=roles[:4],
+        focus_qa_keywords=focus,
+        skill_keywords=skills,
+        qa_title_fallback=qa_title_fallback,
     ).model_dump()
-    designer = SearchSpec(
-        role_keywords=["product designer", "ux designer"],
-        skill_keywords=["figma"],
-        allowed_locations=["europe", "germany", "berlin"],
-        candidate_locations=["germany", "berlin"],
-        workplace_types=["remote", "hybrid", "on-site"],
-    ).model_dump()
-    return {"qa": qa, "developer": developer, "designer": designer}
 
 
 def search_examples():
-    presets = search_presets()
-    for preset in presets.values():
-        for field in (
-            "allowed_locations",
-            "blocked_locations",
-            "candidate_locations",
-            "hybrid_locations",
-        ):
-            preset[field] = []
-    return presets
+    templates = {
+        "qa": profession_template(
+            "QA · общий шаблон",
+            ["qa engineer", "quality assurance engineer", "software tester", "тестировщик"],
+            ["manual testing", "test automation", "api testing", "regression testing"],
+            ["test design", "test cases", "bug reporting", "postman", "sql", "jira", "testrail"],
+            qa_title_fallback=True,
+        ),
+        "manual_qa": profession_template(
+            "Manual QA",
+            ["manual qa", "manual tester", "manual test engineer", "ручной тестировщик"],
+            ["exploratory testing", "regression testing", "functional testing", "api testing"],
+            [
+                "test design",
+                "checklists",
+                "bug reporting",
+                "postman",
+                "devtools",
+                "sql",
+                "jira",
+                "testrail",
+            ],
+        ),
+        "qa_automation": profession_template(
+            "QA Automation / SDET",
+            [
+                "qa automation",
+                "test automation engineer",
+                "sdet",
+                "software development engineer in test",
+                "инженер по автоматизации тестирования",
+            ],
+            ["test automation", "end-to-end testing", "api testing", "test frameworks"],
+            [
+                "playwright",
+                "selenium",
+                "cypress",
+                "pytest",
+                "junit",
+                "allure",
+                "github actions",
+                "docker",
+            ],
+        ),
+        "developer": profession_template(
+            "Backend и разработка ПО",
+            ["backend engineer", "software engineer", "backend developer", "бэкенд-разработчик"],
+            ["rest api", "microservices", "distributed systems", "backend development"],
+            [
+                "python",
+                "java",
+                "golang",
+                "node.js",
+                "postgresql",
+                "redis",
+                "docker",
+                "git",
+                "fastapi",
+            ],
+        ),
+        "frontend": profession_template(
+            "Frontend-разработка",
+            [
+                "frontend engineer",
+                "frontend developer",
+                "front-end developer",
+                "фронтенд-разработчик",
+            ],
+            ["web accessibility", "web performance", "design systems", "responsive design"],
+            [
+                "typescript",
+                "javascript",
+                "react",
+                "vue.js",
+                "angular",
+                "next.js",
+                "html",
+                "css",
+                "vite",
+                "playwright",
+            ],
+        ),
+        "fullstack": profession_template(
+            "Full-stack-разработка",
+            [
+                "full stack engineer",
+                "full-stack developer",
+                "fullstack developer",
+                "фулстек-разработчик",
+            ],
+            ["full-stack development", "rest api", "system design", "web development"],
+            ["typescript", "react", "next.js", "node.js", "python", "postgresql", "docker", "git"],
+        ),
+        "mobile": profession_template(
+            "Мобильная разработка",
+            [
+                "mobile engineer",
+                "ios developer",
+                "android developer",
+                "flutter developer",
+                "react native developer",
+                "мобильный разработчик",
+            ],
+            ["mobile development", "mobile architecture", "app performance", "mobile applications"],
+            [
+                "swift",
+                "swiftui",
+                "kotlin",
+                "jetpack compose",
+                "flutter",
+                "react native",
+                "xcode",
+                "android studio",
+            ],
+        ),
+        "designer": profession_template(
+            "Продуктовый и UX/UI-дизайн",
+            ["product designer", "ux designer", "ui/ux designer", "продуктовый дизайнер"],
+            ["design systems", "interaction design", "user flows", "ux research"],
+            [
+                "figma",
+                "figjam",
+                "prototyping",
+                "wireframing",
+                "usability testing",
+                "accessibility",
+                "maze",
+            ],
+        ),
+        "ux_research": profession_template(
+            "UX-исследования",
+            ["ux researcher", "user researcher", "design researcher", "ux-исследователь"],
+            ["user research", "generative research", "qualitative research", "research synthesis"],
+            [
+                "user interviews",
+                "usability testing",
+                "survey design",
+                "dovetail",
+                "maze",
+                "figjam",
+                "miro",
+            ],
+        ),
+        "data_analyst": profession_template(
+            "Аналитика данных и продукта",
+            [
+                "data analyst",
+                "product analyst",
+                "bi analyst",
+                "аналитик данных",
+                "продуктовый аналитик",
+            ],
+            ["product analytics", "business intelligence", "experimentation", "data visualization"],
+            ["sql", "python", "excel", "tableau", "power bi", "looker", "amplitude", "a/b testing"],
+        ),
+        "business_analyst": profession_template(
+            "Бизнес- и системный анализ",
+            [
+                "business analyst",
+                "systems analyst",
+                "business systems analyst",
+                "бизнес-аналитик",
+                "системный аналитик",
+            ],
+            [
+                "requirements analysis",
+                "business processes",
+                "business analysis",
+                "systems analysis",
+            ],
+            ["bpmn", "uml", "sql", "jira", "confluence", "miro", "user stories", "openapi"],
+        ),
+        "data_engineer": profession_template(
+            "Data Engineering",
+            ["data engineer", "analytics engineer", "etl developer", "инженер данных"],
+            ["data pipelines", "data modeling", "data warehouse", "stream processing"],
+            ["sql", "python", "dbt", "airflow", "spark", "kafka", "bigquery", "snowflake"],
+        ),
+        "devops": profession_template(
+            "DevOps / SRE",
+            [
+                "devops engineer",
+                "site reliability engineer",
+                "platform engineer",
+                "cloud infrastructure engineer",
+            ],
+            ["infrastructure as code", "observability", "incident response", "continuous delivery"],
+            [
+                "linux",
+                "terraform",
+                "kubernetes",
+                "docker",
+                "ansible",
+                "prometheus",
+                "grafana",
+                "github actions",
+            ],
+        ),
+        "product_manager": profession_template(
+            "Product Management",
+            ["product manager", "product owner", "продакт-менеджер", "менеджер продукта"],
+            ["product discovery", "product strategy", "roadmap", "experimentation"],
+            [
+                "user interviews",
+                "product metrics",
+                "prioritization",
+                "jira",
+                "amplitude",
+                "mixpanel",
+                "figma",
+            ],
+        ),
+    }
+    return {
+        "items": {key: profile for key, (_, profile) in templates.items()},
+        "labels": {key: label for key, (label, _) in templates.items()},
+    }

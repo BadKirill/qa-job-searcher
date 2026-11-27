@@ -80,21 +80,25 @@ export function ManualJob({
     }
   }
   return (
-    <dialog ref={dialog} className="manual-job-dialog" aria-labelledby="manual-job-title"
+    <dialog ref={dialog} className="workspace-dialog manual-job-dialog" aria-labelledby="manual-job-title"
       onCancel={(event) => { event.preventDefault(); if (!busy) onClose(); }}>
       <form onSubmit={(event) => { event.preventDefault(); void save(); }}>
         <h2 id="manual-job-title">{job ? "Изменить вакансию" : "Добавить вакансию"}</h2>
-        <label>Ссылка на вакансию<input type="url" value={data.url} maxLength={2048}
-          onChange={(event) => change("url", event.target.value)} /></label>
-        <button type="button" className="button secondary" disabled={!!busy || !data.url.trim()}
-          onClick={() => void preview()}>{busy === "preview" ? "Получаем объявление…" : "Получить предпросмотр"}</button>
+        <div className="inline-form-fields">
+          <label>Ссылка на вакансию<input type="url" value={data.url} maxLength={2048}
+            onChange={(event) => change("url", event.target.value)} /></label>
+          <button type="button" className="button secondary" disabled={!!busy || !data.url.trim()}
+            onClick={() => void preview()}>{busy === "preview" ? "Получаем объявление…" : "Получить предпросмотр"}</button>
+        </div>
         <p role="status">{notice}</p>
         <label>Название вакансии<input required value={data.title} maxLength={240}
           onChange={(event) => change("title", event.target.value)} /></label>
-        <label>Компания<input required value={data.company} maxLength={240}
-          onChange={(event) => change("company", event.target.value)} /></label>
-        <label>Локация<input value={data.location} maxLength={240}
-          onChange={(event) => change("location", event.target.value)} /></label>
+        <div className="manual-job-fields">
+          <label>Компания<input required value={data.company} maxLength={240}
+            onChange={(event) => change("company", event.target.value)} /></label>
+          <label>Локация<input value={data.location} maxLength={240}
+            onChange={(event) => change("location", event.target.value)} /></label>
+        </div>
         <label>Описание вакансии<textarea required minLength={40} maxLength={60000} rows={7}
           value={data.description} onChange={(event) => change("description", event.target.value)} /></label>
         {error && <Notice>{error}</Notice>}

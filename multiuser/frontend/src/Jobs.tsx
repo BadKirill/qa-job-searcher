@@ -19,7 +19,7 @@ const summaryLabels: Record<string, string> = {
   responsibilities: "Задачи", requirements: "Требования", stack: "Стек", benefits: "Условия",
 };
 const languageNames: Record<string, string> = { ru: "русский", en: "английский" };
-const postingLabels = { open: "Открыта", closed: "Закрыта", unconfirmed: "Не удалось подтвердить" };
+const postingLabels = { open: "Вакансия открыта", closed: "Вакансия закрыта", unconfirmed: "Не удалось подтвердить оригинал" };
 
 export function JobCard({
   snapshotId,
@@ -219,8 +219,8 @@ export function JobCard({
         <ul className="posting-summary" aria-label="Кратко о вакансии">
           {job.summary.map((item, index) => (
             <li key={`${item.field}-${index}`}>
-              <strong>{summaryLabels[item.field] ?? item.field}</strong> · {item.value}
-              {safeJobUrl(item.url) && <a href={safeJobUrl(item.url)!} target="_blank" rel="noreferrer" title={item.evidence}>Источник</a>}
+              <strong>{summaryLabels[item.field] ?? item.field}</strong>
+              <p>{item.value} {safeJobUrl(item.url) && <a href={safeJobUrl(item.url)!} target="_blank" rel="noreferrer" title={item.evidence}>Источник</a>}</p>
             </li>
           ))}
         </ul>
@@ -305,14 +305,14 @@ export function JobCard({
         </p>
       )}
       {personal && (
-        <div className="posting-check">
-          <p role="status">
-            {postingPending ? taskLabel(postingTask!.status, "posting_check") : postingTask?.status === "failed" ? postingTask.error : posting ? `${postingLabels[posting.status]} · ${formatCreatedAt(posting.checked_at)} · ${posting.evidence}`
-              : "Статус объявления ещё не проверен."}
-          </p>
+        <div className="posting-check" data-posting-status={posting?.status}>
+          <div role="status">
+            <strong>{postingPending ? taskLabel(postingTask!.status, "posting_check") : postingTask?.status === "failed" ? "Проверка прервалась" : posting ? postingLabels[posting.status] : "Статус объявления ещё не проверен."}</strong>
+            {!postingPending && (postingTask?.status === "failed" ? <p>{postingTask.error}</p> : posting && <p>{posting.evidence} <time dateTime={posting.checked_at}>{formatCreatedAt(posting.checked_at)}</time></p>)}
+          </div>
           <button className="button secondary" type="button" disabled={checking || postingPending}
             onClick={() => void checkOriginal()}>
-            {checking ? "Проверяем оригинал…" : job.description_quality === "fragment" || job.description_quality === "missing"
+            {checking ? "Проверяем оригинал…" : posting?.status !== "closed" && (job.description_quality === "fragment" || job.description_quality === "missing")
               ? "Найти полное описание" : "Проверить объявление"}
           </button>
         </div>
@@ -530,7 +530,12 @@ export function Jobs({
     if (snapshot.current) query.set("snapshot_id", snapshot.current);
     if (run) query.set("run_id", run);
     try {
-      const data = await request<JobPage>(`/jobs?${query}`, { signal });
+      let data = await request<JobPage>(`/jobs?${query}`, { signal });
+      if (!signal.aborted && tab === "active" && page === 1 && !run && snapshot.current
+        && data.latest_run_id && data.search_run?.id !== data.latest_run_id) {
+        query.delete("snapshot_id");
+        data = await request<JobPage>(`/jobs?${query}`, { signal });
+      }
       if (signal.aborted) return;
       setError("");
       if (data.pages > 0 && page > data.pages) {
@@ -602,22 +607,17 @@ export function Jobs({
   }
   const headings = {
     active: {
-      eyebrow: "ВАШ СЛЕДУЮЩИЙ ШАГ",
       title: "Подходящие вакансии",
-      description: "Возможности, с которых хочется начать разговор.",
     },
     applied: {
-      eyebrow: "ВАШИ ОТКЛИКИ",
       title: "Отклики",
       description: "Вакансии, на которые вы уже откликнулись.",
     },
     manual: {
-      eyebrow: "ЛИЧНЫЕ ВАКАНСИИ",
       title: "Добавленные вручную",
       description: "Вакансии, которые вы сохранили по ссылке или описанию.",
     },
     archive: {
-      eyebrow: "ВСЁ ПОД КОНТРОЛЕМ",
       title: "Архив вакансий",
       description: "Вакансии, которые вы отложили. Любую можно вернуть.",
     },
@@ -626,12 +626,10 @@ export function Jobs({
     <div>
       <div className="page-heading">
         <div>
-          <p className="eyebrow">{headings.eyebrow}</p>
           <h1>
             {headings.title}
-            <span className="heading-dot">.</span>
           </h1>
-          <p className="muted">{headings.description}</p>
+          {"description" in headings && <p className="muted">{headings.description}</p>}
         </div>
         {tab === "active" && (
           <button
@@ -649,7 +647,7 @@ export function Jobs({
           onClick={() => void cancelSearch(searchTask)}>Отменить поиск</button>
       )}
       {personal && (tab === "active" || tab === "manual") && (
-        <div className="source-actions">
+        <div className="job-list-actions">
           <button type="button" className="button secondary" onClick={() => setAddJob(true)}>Добавить вакансию</button>
           {tab === "active" && onManual && (
             <button type="button" className="text-button" onClick={onManual}>Добавленные вручную</button>
@@ -679,6 +677,9 @@ export function Jobs({
             new Date(result.snapshot_at).getTime() <
               new Date(result.last_search_at).getTime() &&
             " · Просматривается сохранённый снимок"}
+          {result?.schedule && <small className="search-freshness-schedule">{result.schedule.enabled
+            ? `Следующее автообновление · ${formatCreatedAt(new Date(result.schedule.next_run_at * 1000).toISOString())}`
+            : "Автоматическое обновление выключено"}</small>}
         </span>
       </div>
       {error && (
