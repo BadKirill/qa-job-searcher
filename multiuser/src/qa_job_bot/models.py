@@ -35,6 +35,7 @@ class Job:
     match_reasons: list[str] = field(default_factory=list)
     location_status: str = "unknown"
     resolved_fingerprint: str | None = field(default=None, repr=False)
+    description_quality: str = ""
 
     @property
     def fingerprint(self) -> str:
@@ -66,3 +67,4 @@ class MatchResult:
     score: int
     reasons: list[str]
     location_status: str
+    location_code: str | None = None

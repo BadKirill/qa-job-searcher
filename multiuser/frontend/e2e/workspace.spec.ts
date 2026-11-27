@@ -85,17 +85,17 @@ test("private access, pagination, applied and archive survive browser reload", a
   await secondPopup.close();
   await page.getByRole("button", { name: "Да", exact: true }).click();
   await expect(card).toHaveCount(0);
-  await page.getByRole("button", { name: "Applied", exact: true }).click();
-  await expect(card.getByText("applied", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Отклики", exact: true }).click();
+  await expect(card.getByText("Отклик отправлен", { exact: true })).toBeVisible();
   await page.reload();
-  await page.getByRole("button", { name: "Applied", exact: true }).click();
+  await page.getByRole("button", { name: "Отклики", exact: true }).click();
   await expect(card).toHaveClass(/job-applied/);
   await card.getByRole("button", { name: "Не подходит" }).click();
   await page.getByRole("button", { name: "Архив", exact: true }).click();
-  await expect(card.getByText("applied", { exact: true })).toBeVisible();
+  await expect(card.getByText("Отклик отправлен", { exact: true })).toBeVisible();
   await card.getByRole("button", { name: "Вернуть из архива" }).click();
-  await page.getByRole("button", { name: "Applied", exact: true }).click();
-  await card.getByRole("button", { name: "Отменить applied" }).click();
+  await page.getByRole("button", { name: "Отклики", exact: true }).click();
+  await card.getByRole("button", { name: "Отменить отметку об отклике" }).click();
   await expect(card).toHaveCount(0);
   await page
     .getByRole("button", { name: "Вакансии", exact: false })

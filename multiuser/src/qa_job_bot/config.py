@@ -118,6 +118,12 @@ class SearchProfile:
         "test automation",
         "quality engineering manager",
     )
+    remote_place_ids: tuple[str, ...] | None = None
+    hybrid_place_ids: tuple[str, ...] | None = None
+    office_place_ids: tuple[str, ...] | None = None
+    preferred_place_ids: tuple[str, ...] = ()
+    excluded_place_ids: tuple[str, ...] = ()
+    availability: dict[str, str] | None = None
     candidate_locations: tuple[str, ...] = ()
     hybrid_locations: tuple[str, ...] = ()
     workplace_types: tuple[str, ...] = ()

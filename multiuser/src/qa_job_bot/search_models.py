@@ -2,10 +2,12 @@ import re
 import unicodedata
 from dataclasses import asdict
 from typing import Annotated, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from qa_job_bot.config import SearchProfile
+from qa_job_bot.geography import PLACES, preference_covers
 
 KINDS = (
     "remotive",
@@ -50,7 +52,35 @@ class StrictInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
+class Availability(StrictInput):
+    zone: Annotated[str, Field(min_length=1, max_length=60)]
+    start: Annotated[str, Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")]
+    end: Annotated[str, Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")]
+
+    @field_validator("zone")
+    @classmethod
+    def known_zone(cls, value):
+        try:
+            ZoneInfo(value)
+        except (ValueError, ZoneInfoNotFoundError):
+            raise ValueError("Выберите часовой пояс IANA") from None
+        return value
+
+    @model_validator(mode="after")
+    def nonempty_window(self):
+        if self.start == self.end:
+            raise ValueError("Начало и конец доступности должны различаться")
+        return self
+
+
 class SearchSpec(StrictInput):
+    remote_place_ids: Terms | None = None
+    hybrid_place_ids: Terms | None = None
+    office_place_ids: Terms | None = None
+    preferred_place_ids: Terms = []
+    excluded_place_ids: Terms = []
+    availability: Availability | None = None
+
     role_keywords: Annotated[list[str], Field(min_length=1, max_length=40)]
     source_queries: Annotated[list[str], Field(max_length=8)] = []
     excluded_title_keywords: Terms = []
@@ -89,6 +119,38 @@ class SearchSpec(StrictInput):
     def terms(cls, values):
         return list(dict.fromkeys(clean_text(item).casefold() for item in values))
 
+    @field_validator(
+        "remote_place_ids",
+        "hybrid_place_ids",
+        "office_place_ids",
+        "preferred_place_ids",
+        "excluded_place_ids",
+    )
+    @classmethod
+    def place_ids(cls, values, info):
+        if values is None:
+            return None
+        for value in values:
+            if value not in PLACES:
+                raise ValueError("Выберите локацию из подсказок")
+            if info.field_name in {"hybrid_place_ids", "office_place_ids"} and (
+                PLACES[value].kind not in {"city", "country"}
+            ):
+                raise ValueError("Выберите город или страну")
+            if info.field_name == "remote_place_ids" and value == "region:world":
+                raise ValueError("Выберите фактическую локацию")
+        return list(dict.fromkeys(values))
+
+    @model_validator(mode="after")
+    def consistent_places(self):
+        if any(
+            preference_covers(excluded, preferred)
+            for excluded in self.excluded_place_ids
+            for preferred in self.preferred_place_ids
+        ):
+            raise ValueError("Предпочтения и исключения по географии пересекаются")
+        return self
+
     @field_validator("workplace_types")
     @classmethod
     def modes(cls, values):
@@ -121,12 +183,15 @@ class SourceSpec(StrictInput):
                 raise ValueError("У агрегатора нет параметров подключения")
             return {}
         if self.kind == "telegram":
-            if set(value) != {"handle"}:
+            if "handle" not in value or set(value) - {"handle", "tags"}:
                 raise ValueError("Укажите только handle публичного канала")
             handle = clean_text(value["handle"]).removeprefix("@")
             if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", handle):
                 raise ValueError("Нужен handle канала, а не URL")
-            return {"handle": handle}
+            result = {"handle": handle}
+            if "tags" in value:
+                result["tags"] = source_tags(value)
+            return result
         if set(value) - {"name", "token", "region", "tags"} or "token" not in value:
             raise ValueError("Недопустимые параметры доски")
         token = clean_text(value["token"])
@@ -135,15 +200,19 @@ class SourceSpec(StrictInput):
         region = value.get("region", "global")
         if region not in ({"global", "eu"} if self.kind == "lever" else {"global"}):
             raise ValueError("Недопустимый регион API")
-        tags = value.get("tags", [])
-        if not isinstance(tags, list) or len(tags) > 12:
-            raise ValueError("Не более 12 тегов")
         return {
             "name": clean_text(value.get("name", token)),
             "token": token,
             "region": region,
-            "tags": list(dict.fromkeys(clean_text(tag) for tag in tags)),
+            "tags": source_tags(value),
         }
+
+
+def source_tags(value):
+    tags = value.get("tags", [])
+    if not isinstance(tags, list) or len(tags) > 12:
+        raise ValueError("Не более 12 тегов")
+    return list(dict.fromkeys(clean_text(tag) for tag in tags))
 
 
 def source_identity(kind, config):
@@ -194,3 +263,16 @@ def search_presets():
         workplace_types=["remote", "hybrid", "on-site"],
     ).model_dump()
     return {"qa": qa, "developer": developer, "designer": designer}
+
+
+def search_examples():
+    presets = search_presets()
+    for preset in presets.values():
+        for field in (
+            "allowed_locations",
+            "blocked_locations",
+            "candidate_locations",
+            "hybrid_locations",
+        ):
+            preset[field] = []
+    return presets

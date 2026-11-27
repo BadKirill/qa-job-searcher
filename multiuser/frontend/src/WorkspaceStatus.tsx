@@ -76,8 +76,8 @@ export function WorkspaceStatus({
             aria-label="Личная очередь"
             aria-live="polite"
           >
-            <span>В очереди: {summary.queue.queued}</span>
-            <span>Выполняется: {summary.queue.active}</span>
+            {summary.queue.queued > 0 && <span>Заданий в очереди: {summary.queue.queued}</span>}
+            {summary.queue.active > 0 && <span>Заданий выполняется: {summary.queue.active}</span>}
             {summary.queue.attention > 0 && (
               <span>Требуют внимания: {summary.queue.attention}</span>
             )}

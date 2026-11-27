@@ -238,6 +238,60 @@ def fixture_source_client(include_qa=False, **kwargs):
     async def response(request):
         host = request.headers["host"]
         token = request.url.path.rsplit("/", 1)[-1]
+        if host == "boards-api.greenhouse.io" and "/stage-feedback/" in request.url.path:
+            if token == "101":
+                return httpx.Response(404)
+            return httpx.Response(
+                200,
+                json={
+                    "id": int(token) if token != "102" else 999,
+                    "title": "Platform Specialist",
+                    "company_name": "Example Company",
+                    "location": {"name": "Worldwide"},
+                    "content": (
+                        "<h2>About us</h2>"
+                        "<p>We are a fintech company founded in 2018 with 100 employees.</p>"
+                        "<h2>About the role</h2><p>You will improve platform reliability.</p>"
+                        "<p>Time zone: CET</p>"
+                        "<p>Requirements: Russian and English</p>"
+                        "<p>Build reliable software with Python. "
+                        "At least 4 years of experience.</p>"
+                    ),
+                },
+            )
+        if host.endswith("lever.co") and token == "stage-feedback-geography":
+            cases = {
+                "Europe": ("Europe only", ""),
+                "EU": ("EU only", ""),
+                "Serbia or Georgia": (
+                    "Worldwide",
+                    "Candidates must reside in Serbia or Republic of Georgia.",
+                ),
+                "US": ("US only", ""),
+                "Remote from US": ("Worldwide", "Remote from the United States."),
+                "Except Georgia": ("Worldwide, except Georgia", ""),
+                "Latin America": ("Worldwide", "Where you can work\nChile\nMexico\nColombia"),
+                "US team": ("Worldwide", "Work with our US-based team."),
+                "Required hours": (
+                    "Worldwide",
+                    "Flexible working hours. Must overlap with 9 AM to 5 PM US Eastern.",
+                ),
+                "Incomplete hours": ("Worldwide", "You can start at 3 PM"),
+            }
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": str(index),
+                        "text": f"Backend Engineer · {label}",
+                        "categories": {"location": location},
+                        "workplaceType": "remote",
+                        "hostedUrl": f"https://example.com/geo/{index}",
+                        "descriptionPlain": text or "Build reliable services.",
+                    }
+                    for index, (label, (location, text)) in enumerate(cases.items())
+                ],
+            )
         if "lever.co" in host and token in {
             "stage5-history",
             "stage5-slow",
@@ -288,6 +342,17 @@ def fixture_source_client(include_qa=False, **kwargs):
                             ["Product Designer", "Backend Engineer"]
                             + (["Senior QA Engineer"] if include_qa else [])
                         )
+                    ]
+                    + [
+                        {
+                            "id": str(posting_id),
+                            "title": f"Platform Specialist · {label}",
+                            "company_name": "Example Company",
+                            "candidate_required_location": "Worldwide",
+                            "url": f"https://job-boards.greenhouse.io/stage-feedback/jobs/{posting_id}",
+                            "description": "Work on platform reliability.",
+                        }
+                        for posting_id, label in ((100, "Open"), (101, "Closed"), (102, "Unknown"))
                     ]
                 },
             )

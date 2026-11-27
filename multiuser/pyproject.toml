@@ -42,7 +42,7 @@ qa-job-import = "qa_job_bot.legacy_cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-qa_job_bot = ["migrations/versions/*.sql"]
+qa_job_bot = ["migrations/versions/*.sql", "country_names.json"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

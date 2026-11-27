@@ -66,9 +66,31 @@ export type DocumentPreview = {
   };
   facts: { id: string; text: string; source: string }[];
 };
+export type PostingStatus = {
+  status: "open" | "closed" | "unconfirmed";
+  evidence: string;
+  checked_at: string;
+  url: string;
+};
 export type Job = {
   id: string;
   needs_refresh?: boolean;
+  manual_version?: number | null;
+  description_quality?: string;
+  posting?: PostingStatus | null;
+  summary?: { field: string; value: string; evidence: string; url: string }[];
+  language_evidence?: { kind: string; languages: string[]; evidence: string; alternatives?: string[][] }[];
+  work_time?: {
+    evidence: string;
+    zone: string | null;
+    start: string | null;
+    end: string | null;
+    mandatory: boolean;
+    minimum_overlap?: number | null;
+    needs_review: boolean;
+    local_start?: string;
+    local_end?: string;
+  } | null;
   title: string;
   company: string;
   russian_company?: boolean;
@@ -95,6 +117,7 @@ export type Job = {
   documents: Task[];
 };
 export type JobPage = {
+  criteria_changed?: boolean;
   items: Job[];
   total: number;
   page: number;
@@ -112,7 +135,7 @@ export type Message = {
   status?: string;
   created_at: string;
 };
-export type View = "active" | "applied" | "archive" | "profile";
+export type View = "manual" | "active" | "applied" | "archive" | "profile";
 
 export type SearchRun = {
   id: string;

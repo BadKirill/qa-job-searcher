@@ -62,6 +62,7 @@ class GreenhouseSource(JobSource):
                     company=self.board.name,
                     location=location,
                     url=str(item.get("absolute_url") or ""),
+                    description_quality="full",
                     description=description,
                     published_at=published,
                     remote=workplace_type == "remote",

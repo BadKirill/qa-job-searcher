@@ -12,10 +12,18 @@ from sqlalchemy.dialects.postgresql import insert
 from qa_job_bot import pg_schema as s
 from qa_job_bot.company_origin import is_russian_company
 from qa_job_bot.job_details import extract_details
+from qa_job_bot.job_language import language_display
 from qa_job_bot.models import canonical_text, utcnow
 from qa_job_bot.pg_access import OwnedRepository, upsert
+from qa_job_bot.posting_details import (
+    last_confirmed_posting,
+    posting_observation_key,
+    verified_description,
+)
+from qa_job_bot.posting_summary import posting_summary
 from qa_job_bot.repository import JobRepository
 from qa_job_bot.web_store import StoreError, digest
+from qa_job_bot.work_time import display_work_time
 
 
 def public_payload(job):
@@ -178,15 +186,38 @@ class PersonalJobs(OwnedRepository):
         data["payload"] = data["personal_payload"].get("job", data["payload"])
         return data
 
-    def card_data(self, connection, row, card=None):
+    def card_data(self, connection, row, card=None, search_run=None):
         card = card or row.get("personal_payload", {})
-        job = card.get("job", row["payload"])
+        saved_job = card.get("job", row["payload"])
+        observation = posting_observation_key(row["id"], digest(saved_job))
+        check = self.setting(connection, "posting_checks", {}).get(observation, {})
+        confirmed = last_confirmed_posting(check)
+        job = (
+            saved_job
+            if card.get("manual") or card.get("historical")
+            else verified_description(saved_job, check)
+        )
+        description = job.get("description", "")
+        details = extract_details(description, job["title"])
+        work_time = card.get("work_time")
+        if job is not saved_job or "work_time" not in card:
+            run = search_run or {}
+            availability = run.get("inputs", {}).get("profile", {}).get("availability")
+            checked_on = datetime.fromisoformat(run["created_at"]) if run else row["last_seen_at"]
+            work_time = display_work_time(description, availability, checked_on.date())
         return {
             **job,
             "id": row["id"],
             "score": card.get("score", row["score"]),
             "match_reasons": card.get("reasons", row["reasons"]),
             "location_status": card.get("location_status", row["location_status"]),
+            "location_code": card.get("location_code"),
+            "work_time": work_time,
+            "manual_version": card.get("manual_version"),
+            "posting": confirmed if confirmed.get("status") == "closed" else check.get("status"),
+            "description_quality": (job.get("description_quality") or "fragment")
+            if description
+            else "missing",
             "freshness": card.get("freshness", "legacy"),
             "fetched_at": card.get("fetched_at", row["last_seen_at"].isoformat()),
             "last_seen_at": card.get("fetched_at", row["last_seen_at"].isoformat()),
@@ -194,7 +225,9 @@ class PersonalJobs(OwnedRepository):
             "applied_at": row["applied_at"],
             "archived_at": row["archived_at"],
             "russian_company": is_russian_company(job.get("description", ""), job["company"]),
-            "details": extract_details(job.get("description", ""), job["title"]),
+            "details": details,
+            "language_evidence": language_display(description, job["company"]),
+            "summary": posting_summary(description, details, job["url"]),
             "documents": self.task_list(connection, row["id"]),
         }
 
@@ -245,7 +278,7 @@ class PersonalJobs(OwnedRepository):
             self.touch(connection)
 
     def list_jobs(self, tab, page, snapshot_id=None, run_id=None):
-        if tab not in {"active", "applied", "archive"} or page < 1:
+        if tab not in {"active", "applied", "archive", "manual"} or page < 1:
             raise StoreError("Некорректная страница.", 422)
         with self.write() as connection:
             if snapshot_id:
@@ -290,6 +323,9 @@ class PersonalJobs(OwnedRepository):
                         }
                         for row in entries
                     }
+                    if run_id:
+                        for card in cards.values():
+                            card["historical"] = True
                     ids = list(cards)
                 else:
                     ids = list(
@@ -305,6 +341,15 @@ class PersonalJobs(OwnedRepository):
                     ids = []
                 if not run_id:
                     extras = set(self.setting(connection, "imported_jobs", []))
+                    if tab == "manual":
+                        extras.update(
+                            connection.execute(
+                                select(s.matches.c.job_id).where(
+                                    self.owned(s.matches),
+                                    s.matches.c.payload["manual"].as_boolean().is_(True),
+                                )
+                            ).scalars()
+                        )
                     extras.update(
                         connection.execute(
                             select(s.states.c.job_id).where(self.owned(s.states))
@@ -343,8 +388,31 @@ class PersonalJobs(OwnedRepository):
                 for row in connection.execute(select(s.states).where(self.owned(s.states)))
             }
             last_search = self.setting(connection, "last_search_at")
+            checks = self.setting(connection, "posting_checks", {})
+            inputs = (frozen.get("search_run") or {}).get("inputs", {})
+            profile = self.profile_data(connection)
+            criteria_changed = bool(inputs) and profile["generation"] != inputs.get(
+                "profile_generation", inputs.get("profile_version")
+            )
         selected = []
         for key in ids:
+            card = frozen.get("cards", {}).get(key, {})
+            manual = card.get("manual", False)
+            if (tab == "manual" and not manual) or (tab == "active" and manual):
+                continue
+            cached_job = card.get("job", {})
+            check = checks.get(posting_observation_key(key, digest(cached_job)), {})
+            if tab == "active" and not run_id and check:
+                if last_confirmed_posting(check).get("status") == "closed":
+                    continue
+                if (
+                    inputs.get("profile")
+                    and check.get("original")
+                    and self.invalid_after_enrichment(
+                        cached_job, check, inputs["profile"], frozen["search_run"]["created_at"]
+                    )
+                ):
+                    continue
             applied, archived = states.get(key, (None, None))
             belongs = (
                 bool(archived)
@@ -362,7 +430,10 @@ class PersonalJobs(OwnedRepository):
         with self.read() as connection:
             items = [
                 self.card_data(
-                    connection, self.job_row(connection, key), frozen.get("cards", {}).get(key)
+                    connection,
+                    self.job_row(connection, key),
+                    frozen.get("cards", {}).get(key),
+                    frozen.get("search_run"),
                 )
                 for key in selected[(page - 1) * 10 : page * 10]
             ]
@@ -370,6 +441,7 @@ class PersonalJobs(OwnedRepository):
             "items": items,
             "search_run": frozen.get("search_run"),
             "latest_run_id": self.get_setting("current_search_run"),
+            "criteria_changed": criteria_changed,
             "total": len(selected),
             "page": page,
             "pages": pages,
@@ -377,6 +449,19 @@ class PersonalJobs(OwnedRepository):
             "snapshot_at": datetime.fromtimestamp(snapshot_at, UTC).isoformat(),
             "last_search_at": last_search,
         }
+
+    @staticmethod
+    def invalid_after_enrichment(job, check, criteria, created_at):
+        from qa_job_bot.search_models import SearchSpec
+        from qa_job_bot.search_pipeline import load_job
+        from qa_job_bot.universal_matching import location_decision
+
+        enriched = load_job(verified_description(job, check))
+        profile = SearchSpec.model_validate(criteria).runtime()
+        decision = location_decision(enriched, profile, datetime.fromisoformat(created_at).date())
+        return decision.status in {"blocked", "not_remote"} or (
+            decision.status == "unknown" and not profile.allow_unknown_remote_location
+        )
 
     def change_state(self, job_id, values):
         if not values or not set(values) <= {"applied", "archived"}:

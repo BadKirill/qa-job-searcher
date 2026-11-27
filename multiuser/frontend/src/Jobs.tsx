@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { errorMessage, isPending, request, requestId, safeJobUrl } from "./api";
+import { errorMessage, forgetOperation, isPending, operationKey, request, safeJobUrl, taskLabel } from "./api";
 import { SearchHistory, SearchRunSummary } from "./SearchHistory";
 import { Chat } from "./Chat";
+import { ManualJob } from "./ManualJob";
 import {
   formatCreatedAt,
   Icon,
@@ -9,29 +10,47 @@ import {
   Notice,
   TaskStatus,
 } from "./components";
-import type { Job, JobPage, Task } from "./types";
+import type { Job, JobPage, PostingStatus, Task } from "./types";
 import { useRefreshEffect } from "./useRefreshEffect";
+
+const summaryLabels: Record<string, string> = {
+  company_focus: "О компании", industry: "Отрасль", company_size: "Размер компании",
+  founded: "Год основания", role_focus: "Фокус роли", experience: "Опыт",
+  responsibilities: "Задачи", requirements: "Требования", stack: "Стек", benefits: "Условия",
+};
+const languageNames: Record<string, string> = { ru: "русский", en: "английский" };
+const postingLabels = { open: "Открыта", closed: "Закрыта", unconfirmed: "Не удалось подтвердить" };
 
 export function JobCard({
   snapshotId,
+  personal = false,
   job,
   tasks,
   hasTemplate,
   onProfile,
   onState,
   onTask,
+  onContentChange,
   revision,
 }: {
   snapshotId?: string;
+  personal?: boolean;
   job: Job;
   tasks: Task[];
   hasTemplate: boolean;
   onProfile: () => void;
   onState: () => void;
   onTask: () => void;
+  onContentChange?: () => void;
   revision: number;
 }) {
+  const operations = useRef(new Map<string, string>());
   const [busy, setBusy] = useState("");
+  const [editingJob, setEditingJob] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [postingNotice, setPostingNotice] = useState<PostingStatus | null>(null);
+  const [queuedPosting, setQueuedPosting] = useState<Task | null>(null);
+  const [needsTemplate, setNeedsTemplate] = useState(false);
   const [deletingTask, setDeletingTask] = useState("");
   const [error, setError] = useState("");
   const [confirmingApplied, setConfirmingApplied] = useState(false);
@@ -83,7 +102,8 @@ export function JobCard({
   }
   async function generate(kind: "cv" | "cover_letter") {
     if (!hasTemplate) {
-      onProfile();
+      if (job.manual_version) setNeedsTemplate(true);
+      else onProfile();
       return;
     }
     if (busy) return;
@@ -95,12 +115,14 @@ export function JobCard({
         body: {
           kind,
           language: kind === "cv" ? "en" : "auto",
-          request_id: requestId(),
+          request_id: operationKey(operations.current, kind),
           ...(snapshotId ? { snapshot_id: snapshotId } : {}),
         },
       });
+      forgetOperation(operations.current, kind);
       onTask();
     } catch (failure) {
+      forgetOperation(operations.current, kind, failure);
       setError(errorMessage(failure));
     } finally {
       setBusy("");
@@ -133,6 +155,28 @@ export function JobCard({
       setDeletingTask("");
     }
   }
+  async function checkOriginal() {
+    setChecking(true);
+    setError("");
+    try {
+      const data = await request<{ posting?: PostingStatus; task?: Task }>(`/jobs/${encodeURIComponent(job.id)}/check-posting`, {
+        method: "POST", body: { request_id: operationKey(operations.current, "posting") },
+      });
+      forgetOperation(operations.current, "posting");
+      if (data.posting) setPostingNotice(data.posting);
+      if (data.task) setQueuedPosting(data.task);
+      onTask();
+    } catch (failure) {
+      forgetOperation(operations.current, "posting", failure);
+      setError(errorMessage(failure));
+    } finally {
+      setChecking(false);
+    }
+  }
+  const postingTask = tasks.find((task) => task.kind === "posting_check" && task.job_id === job.id) ?? queuedPosting;
+  const postingPending = postingTask ? isPending(postingTask.status) : false;
+  const posting = job.posting ?? postingNotice;
+  const workTime = job.work_time;
   return (
     <article
       className={`job-card${job.applied_at ? " job-applied" : ""}`}
@@ -152,7 +196,7 @@ export function JobCard({
         {job.applied_at && (
           <span className="applied-badge">
             <Icon name="check" size={14} />
-            applied
+            Отклик отправлен
           </span>
         )}
       </div>
@@ -160,7 +204,7 @@ export function JobCard({
         <h2>{job.title}</h2>
         {job.salary && <span className="salary">{job.salary}</span>}
       </div>
-      <div className="job-match" aria-label="Причины подбора">
+      {!job.manual_version && <div className="job-match" aria-label="Причины подбора">
         <strong>{job.score}/100</strong>
         <span>Рейтинг по фильтрам</span>
         {job.match_reasons?.length > 0 && (
@@ -170,9 +214,37 @@ export function JobCard({
             ))}
           </ul>
         )}
-      </div>
+      </div>}
+      {!!job.summary?.length && (
+        <ul className="posting-summary" aria-label="Кратко о вакансии">
+          {job.summary.map((item, index) => (
+            <li key={`${item.field}-${index}`}>
+              <strong>{summaryLabels[item.field] ?? item.field}</strong> · {item.value}
+              {safeJobUrl(item.url) && <a href={safeJobUrl(item.url)!} target="_blank" rel="noreferrer" title={item.evidence}>Источник</a>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {job.language_evidence?.map((item, index) => (
+        <p className="small" key={`${item.kind}-${index}`} title={item.evidence}>
+          {item.kind === "required" ? "Требуются" : item.kind === "team" ? "Язык команды" : item.kind === "company_inferred" ? "Предположение по компании" : "Язык публикации, предположение"}
+          {" · "}
+          {item.alternatives?.length
+            ? item.alternatives.map((group) => group.map((language) => languageNames[language] ?? language).join(" и ")).join(" или ")
+            : item.languages.map((language) => languageNames[language] ?? language).join(", ")}
+        </p>
+      ))}
+      {workTime && (
+        <p className="small">
+          {workTime.needs_review
+            ? workTime.zone ? `Часовой пояс · ${workTime.zone} · Проверьте рабочие часы` : "Проверьте рабочие часы"
+            : `${workTime.mandatory ? "Обязательные часы" : "Рабочие часы"} · ${workTime.start}–${workTime.end} ${workTime.zone}`}
+          {workTime.local_start && workTime.local_end && ` · ваше время ${workTime.local_start.slice(11, 16)}–${workTime.local_end.slice(11, 16)}`}
+          {" · "}{workTime.evidence}
+        </p>
+      )}
       {(qaTypes.length > 0 ||
-        job.details.languages.length > 0 ||
+        (!job.language_evidence && job.details.languages.length > 0) ||
         job.details.programming_languages.length > 0) && (
         <div className="tags">
           {qaTypes.map((type) => (
@@ -180,7 +252,7 @@ export function JobCard({
               {type}
             </span>
           ))}
-          {job.details.languages.map((language) => (
+          {!job.language_evidence && job.details.languages.map((language) => (
             <span className="tag" key={language}>
               Язык: {language}
             </span>
@@ -192,32 +264,37 @@ export function JobCard({
           ))}
         </div>
       )}
-      <div className="job-sections">
-        {job.details.responsibilities.length > 0 && (
-          <section>
-            <h3>Чем предстоит заниматься</h3>
-            <ul>
-              {job.details.responsibilities.map((item, index) => (
-                <li key={index}>{item}</li>
-              ))}
-            </ul>
-          </section>
-        )}
-        {job.details.requirements.length > 0 && (
-          <section>
-            <h3>Что понадобится</h3>
-            <ul>
-              {job.details.requirements.map((item, index) => (
-                <li key={index}>{item}</li>
-              ))}
-            </ul>
-          </section>
-        )}
-      </div>
+      {(job.details.responsibilities.length > 0 || job.details.requirements.length > 0) && (
+        <details className="job-description">
+          <summary>Обязанности и требования</summary>
+          <div className="job-sections">
+            {job.details.responsibilities.length > 0 && (
+              <section>
+                <h3>Чем предстоит заниматься</h3>
+                <ul>
+                  {job.details.responsibilities.map((item, index) => (
+                    <li key={index}>{item}</li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {job.details.requirements.length > 0 && (
+              <section>
+                <h3>Что понадобится</h3>
+                <ul>
+                  {job.details.requirements.map((item, index) => (
+                    <li key={index}>{item}</li>
+                  ))}
+                </ul>
+              </section>
+            )}
+          </div>
+        </details>
+      )}
       {job.description && (
         <details className="job-description">
           <summary>
-            Полное описание <span aria-hidden="true">+</span>
+            {job.description_quality === "fragment" ? "Фрагмент описания" : "Полное описание"} <span aria-hidden="true">+</span>
           </summary>
           <p>{job.description}</p>
         </details>
@@ -226,6 +303,30 @@ export function JobCard({
         <p className="muted small">
           Полное описание пока недоступно. Откройте оригинал вакансии.
         </p>
+      )}
+      {personal && (
+        <div className="posting-check">
+          <p role="status">
+            {postingPending ? taskLabel(postingTask!.status, "posting_check") : postingTask?.status === "failed" ? postingTask.error : posting ? `${postingLabels[posting.status]} · ${formatCreatedAt(posting.checked_at)} · ${posting.evidence}`
+              : "Статус объявления ещё не проверен."}
+          </p>
+          <button className="button secondary" type="button" disabled={checking || postingPending}
+            onClick={() => void checkOriginal()}>
+            {checking ? "Проверяем оригинал…" : job.description_quality === "fragment" || job.description_quality === "missing"
+              ? "Найти полное описание" : "Проверить объявление"}
+          </button>
+        </div>
+      )}
+      {needsTemplate && (
+        <Notice tone="info">
+          Для документов нужен подтверждённый шаблон CV. Вакансия сохранена в разделе «Добавленные вручную».
+          <button type="button" className="text-button" onClick={onProfile}>Открыть профиль</button>
+        </Notice>
+      )}
+      {job.manual_version && <button className="text-button" type="button" onClick={() => setEditingJob(true)}>Изменить вакансию</button>}
+      {editingJob && (
+        <ManualJob job={job} onClose={() => setEditingJob(false)}
+          onSave={() => { setEditingJob(false); onContentChange?.(); }} />
       )}
       {job.needs_refresh && (
         <Notice>
@@ -327,7 +428,7 @@ export function JobCard({
             disabled={!!busy}
             onClick={() => void state({ applied: false })}
           >
-            Отменить applied
+            Отменить отметку об отклике
           </button>
         )}
       </footer>
@@ -387,6 +488,7 @@ export function JobCard({
 export function Jobs({
   personal = false,
   tab,
+  onManual,
   revision,
   tasks,
   hasTemplate,
@@ -394,7 +496,8 @@ export function Jobs({
   onTask,
 }: {
   personal?: boolean;
-  tab: "active" | "applied" | "archive";
+  tab: "active" | "applied" | "archive" | "manual";
+  onManual?: () => void;
   revision: number;
   tasks: Task[];
   hasTemplate: boolean;
@@ -408,7 +511,12 @@ export function Jobs({
   const [refresh, setRefresh] = useState(0);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const searchOperations = useRef(new Map<string, string>());
+  const [addJob, setAddJob] = useState(false);
+  const [manualFeedback, setManualFeedback] = useState("");
   const [searching, setSearching] = useState(false);
+  const [cancelingSearch, setCancelingSearch] = useState(false);
+  const [dismissedSearchId, setDismissedSearchId] = useState("");
   const [startedSearch, setStartedSearch] = useState<Task | null>(null);
   const [undo, setUndo] = useState(false);
 
@@ -445,11 +553,13 @@ export function Jobs({
     try {
       const task = await request<Task>("/search-runs", {
         method: "POST",
-        body: { request_id: requestId() },
+        body: { request_id: operationKey(searchOperations.current, "search") },
       });
+      forgetOperation(searchOperations.current, "search");
       setStartedSearch(task);
       onTask();
     } catch (failure) {
+      forgetOperation(searchOperations.current, "search", failure);
       setError(errorMessage(failure));
     } finally {
       setSearching(false);
@@ -466,10 +576,30 @@ export function Jobs({
     setRefresh((value) => value + 1);
     setStartedSearch(null);
   }
-  const currentSearch = tasks.find((task) => task.id === startedSearch?.id) ?? startedSearch;
+  const latestSearch = tasks.find((task) => task.kind === "search");
+  const previousProblem = personal && latestSearch && ["failed", "cancelled"].includes(latestSearch.status)
+    && latestSearch.id !== dismissedSearchId ? latestSearch : null;
+  const currentSearch = tasks.find((task) => task.id === startedSearch?.id) ?? startedSearch ?? previousProblem;
   const searchTask = tasks.find(
     (task) => task.kind === "search" && isPending(task.status),
   ) ?? (currentSearch && isPending(currentSearch.status) ? currentSearch : null);
+  async function cancelSearch(task: Task) {
+    setCancelingSearch(true);
+    setError("");
+    try {
+      const response = await request<Task>(`/tasks/${encodeURIComponent(task.id)}/cancel`, { method: "POST" });
+      setStartedSearch(response);
+      onTask();
+    } catch (failure) {
+      setError(errorMessage(failure));
+    } finally {
+      setCancelingSearch(false);
+    }
+  }
+  function dismissSearch(task: Task) {
+    setDismissedSearchId(task.id);
+    setStartedSearch(null);
+  }
   const headings = {
     active: {
       eyebrow: "ВАШ СЛЕДУЮЩИЙ ШАГ",
@@ -478,8 +608,13 @@ export function Jobs({
     },
     applied: {
       eyebrow: "ВАШИ ОТКЛИКИ",
-      title: "Applied",
+      title: "Отклики",
       description: "Вакансии, на которые вы уже откликнулись.",
+    },
+    manual: {
+      eyebrow: "ЛИЧНЫЕ ВАКАНСИИ",
+      title: "Добавленные вручную",
+      description: "Вакансии, которые вы сохранили по ссылке или описанию.",
     },
     archive: {
       eyebrow: "ВСЁ ПОД КОНТРОЛЕМ",
@@ -505,10 +640,31 @@ export function Jobs({
             disabled={searching || !!searchTask}
           >
             <Icon name="refresh" size={16} />
-            {searching || searchTask ? "Обновляем…" : "Обновить поиск"}
+            {searchTask ? taskLabel(searchTask.status, "search") : searching ? "Запускаем поиск…" : "Обновить поиск"}
           </button>
         )}
       </div>
+      {tab === "active" && searchTask && (
+        <button type="button" className="text-button" disabled={cancelingSearch}
+          onClick={() => void cancelSearch(searchTask)}>Отменить поиск</button>
+      )}
+      {personal && (tab === "active" || tab === "manual") && (
+        <div className="source-actions">
+          <button type="button" className="button secondary" onClick={() => setAddJob(true)}>Добавить вакансию</button>
+          {tab === "active" && onManual && (
+            <button type="button" className="text-button" onClick={onManual}>Добавленные вручную</button>
+          )}
+        </div>
+      )}
+      {addJob && (
+        <ManualJob onClose={() => setAddJob(false)} onSave={(_, existing) => {
+          setAddJob(false);
+          setManualFeedback(existing ? "Эта вакансия уже добавлена." : "Вакансия сохранена.");
+          if (tab === "active" && onManual) onManual();
+          else fresh();
+        }} />
+      )}
+      {manualFeedback && <Notice tone="success">{manualFeedback}</Notice>}
       <div className="list-meta">
         <span>
           {result ? `${result.total} вакансий` : "Ваши вакансии"}
@@ -533,6 +689,7 @@ export function Jobs({
           </button>
         </Notice>
       )}
+      {tab === "active" && result?.criteria_changed && <Notice tone="info">Критерии изменились. Запустите новый поиск, чтобы обновить выдачу.</Notice>}
       {(run ||
         (result?.latest_run_id &&
           result.search_run?.id !== result.latest_run_id)) && (
@@ -545,12 +702,12 @@ export function Jobs({
       )}
       {tab === "active" && !currentSearch && searchTask && <TaskStatus task={searchTask} />}
       {tab === "active" && currentSearch?.status === "failed" && (
-        <Notice onClose={() => setStartedSearch(null)}>
+        <Notice onClose={() => dismissSearch(currentSearch)}>
           {currentSearch.error || "Не удалось завершить поиск. Попробуйте запустить его ещё раз."}
         </Notice>
       )}
       {tab === "active" && currentSearch?.status === "cancelled" && (
-        <Notice tone="info" onClose={() => setStartedSearch(null)}>Поиск отменён.</Notice>
+        <Notice tone="info" onClose={() => dismissSearch(currentSearch)}>Поиск отменён.</Notice>
       )}
       {tab === "active" && currentSearch &&
         (isPending(currentSearch.status) || currentSearch.status === "ready") && (
@@ -589,14 +746,15 @@ export function Jobs({
               ? "Новые возможности впереди"
               : tab === "applied"
                 ? "Откликов пока нет"
-                : "В архиве пока пусто"}
+                : tab === "manual" ? "Добавленных вручную вакансий пока нет" : "В архиве пока пусто"}
           </h2>
           <p>
             {tab === "active"
               ? "Запустите поиск, чтобы получить актуальные вакансии."
               : tab === "applied"
                 ? "После подтверждения отклика вакансия появится здесь."
-                : "Здесь будут вакансии, для которых вы выбрали «Не подходит»."}
+                : tab === "manual" ? "Добавьте вакансию по ссылке или вставьте её описание."
+                  : "Здесь будут вакансии, для которых вы выбрали «Не подходит»."}
           </p>
           {tab === "active" && (
             <button
@@ -618,6 +776,7 @@ export function Jobs({
             >
               {result.items.map((job) => (
                 <JobCard
+                personal={personal}
                   key={`${result.snapshot_id}:${job.id}`}
                   snapshotId={result.snapshot_id}
                   job={job}
@@ -625,6 +784,7 @@ export function Jobs({
                   hasTemplate={hasTemplate}
                   onProfile={onProfile}
                   onState={changed}
+                  onContentChange={fresh}
                   onTask={onTask}
                   revision={revision}
                 />

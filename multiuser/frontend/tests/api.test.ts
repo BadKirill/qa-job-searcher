@@ -67,11 +67,11 @@ it("surfaces server errors, malformed errors and expired authorization", async (
   );
   await expect(request("/private")).rejects.toMatchObject({
     status: 401,
-    message: "Expired",
+    message: "Сессия закончилась. Войдите снова.",
   });
   expect(expired).toHaveBeenCalledOnce();
   await expect(request("/bad")).rejects.toBeInstanceOf(ApiError);
-  await expect(request("/broken")).rejects.toThrow("Запрос не выполнен");
+  await expect(request("/broken")).rejects.toThrow("Сервис временно недоступен");
   window.removeEventListener("session-expired", expired);
   expect(errorMessage(new Error("offline"))).toBe("offline");
   expect(errorMessage(null)).toContain("сервером");

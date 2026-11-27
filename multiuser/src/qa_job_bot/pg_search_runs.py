@@ -13,6 +13,7 @@ from qa_job_bot.search_models import SearchSpec
 from qa_job_bot.search_pipeline import load_job, personal_match, source_key, source_queries
 from qa_job_bot.source_http import MAX_RUN_SOURCES
 from qa_job_bot.web_store import StoreError
+from qa_job_bot.work_time import display_work_time
 
 
 class PersonalSearchRuns(OwnedRepository):
@@ -28,19 +29,21 @@ class PersonalSearchRuns(OwnedRepository):
             return self.task_data(connection, prior)
         state = self.preferences_in(connection)
         if not state["search_profile"]["configured"]:
-            raise StoreError("Сначала настройте профиль поиска в разделе «Поиск и источники».", 409)
+            raise StoreError("Сначала настройте профиль поиска в разделе «Настройки поиска».", 409)
         sources = [row for row in state["sources"]["items"] if row["enabled"]]
         if not sources or any(not source["valid"] for source in sources):
-            raise StoreError("Настройте и включите источники в разделе «Поиск и источники».", 409)
+            raise StoreError("Настройте и включите источники в разделе «Настройки поиска».", 409)
         if len(sources) > MAX_RUN_SOURCES:
             raise StoreError("В одном поиске можно включить не более 128 источников.", 409)
         inputs = {
             "profile_version": state["search_profile"]["version"],
+            "profile_id": state["search_profile"]["id"],
+            "profile_generation": state["search_profile"]["generation"],
             "sources_version": state["sources"]["version"],
             "profile": state["search_profile"]["profile"],
             "sources": sources,
         }
-        scope = f"search:{inputs['profile_version']}:{inputs['sources_version']}"
+        scope = f"search:{inputs['profile_generation']}:{inputs['sources_version']}"
         task_id = self.enqueue_in(
             connection, "search", scope, {"search_inputs": inputs}, request_id, request
         )
@@ -164,7 +167,8 @@ class PersonalSearchRuns(OwnedRepository):
                 return False
             state = self.preferences_in(connection)
             published = (
-                state["search_profile"]["version"] == inputs["profile_version"]
+                state["search_profile"]["generation"]
+                == inputs.get("profile_generation", inputs["profile_version"])
                 and state["sources"]["version"] == inputs["sources_version"]
                 and self.setting(connection, "latest_search_requested") == task["id"]
             )
@@ -215,7 +219,7 @@ class PersonalSearchRuns(OwnedRepository):
                         .on_conflict_do_nothing()
                     )
                     seen.add(job.fingerprint)
-                    result = personal_match(job, source, profile)
+                    result = personal_match(job, source, profile, day=now.date())
                     if result.accepted:
                         card = {
                             "job": public_payload(job),
@@ -223,6 +227,10 @@ class PersonalSearchRuns(OwnedRepository):
                             "freshness": "fresh",
                             "fetched_at": batch.fetched_at,
                             "location_status": result.location_status,
+                            "location_code": result.location_code,
+                            "work_time": display_work_time(
+                                job.description, profile.availability, now.date()
+                            ),
                             "score": result.score,
                             "reasons": result.reasons,
                         }
@@ -249,13 +257,17 @@ class PersonalSearchRuns(OwnedRepository):
                 source = source_map.get(provenance.get("id"))
                 if not source or provenance.get("key") != source_key(source):
                     continue
-                result = personal_match(load_job(old["job"]), source, profile)
+                result = personal_match(load_job(old["job"]), source, profile, day=now.date())
                 if result.accepted:
                     matches[job_id] = {
                         **old,
                         "score": result.score,
                         "reasons": result.reasons,
                         "location_status": result.location_status,
+                        "location_code": result.location_code,
+                        "work_time": display_work_time(
+                            old["job"]["description"], profile.availability, now.date()
+                        ),
                         "freshness": "retained" if infos[source["id"]]["error"] else "unconfirmed",
                     }
             ids = sorted(
@@ -330,6 +342,7 @@ class PersonalSearchRuns(OwnedRepository):
                     ("search_errors", errors),
                 ]:
                     self.put_setting(connection, key, value)
+                self.enqueue_posting_checks_after_search(connection, matches, ids, now.timestamp())
             changed = connection.execute(
                 update(s.tasks)
                 .where(*self.live_lease(task["id"], worker_id))

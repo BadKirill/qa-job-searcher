@@ -1,7 +1,7 @@
 import time
 from uuid import uuid4
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from qa_job_bot import pg_schema as s
@@ -10,11 +10,10 @@ from qa_job_bot.search_models import (
     AGGREGATORS,
     SearchSpec,
     SourceSpec,
-    search_presets,
     source_identity,
     universal_profile,
 )
-from qa_job_bot.source_catalog import LABELS, LIMITATIONS
+from qa_job_bot.source_catalog import DESCRIPTIONS, LABELS, LIMITATIONS
 from qa_job_bot.web_store import StoreError
 
 
@@ -29,7 +28,11 @@ class PersonalPreferences(OwnedRepository):
                 key: value
                 for key, value in raw.items()
                 if key
-                in ({"handle"} if kind == "telegram" else {"name", "token", "region", "tags"})
+                in (
+                    {"handle", "tags"}
+                    if kind == "telegram"
+                    else {"name", "token", "region", "tags"}
+                )
             }
         )
         try:
@@ -40,6 +43,11 @@ class PersonalPreferences(OwnedRepository):
         return {
             "id": row["id"],
             "kind": kind,
+            "builtin": kind in AGGREGATORS,
+            "description": DESCRIPTIONS.get(kind),
+            "actions": ["enable", "check"]
+            if kind in AGGREGATORS
+            else ["enable", "check", "edit", "delete"],
             "enabled": row["enabled"],
             "version": row["version"],
             "config": config,
@@ -61,6 +69,35 @@ class PersonalPreferences(OwnedRepository):
             .all()
         )
 
+    def profile_metadata(self, connection):
+        return self.setting(
+            connection,
+            "search_profile_metadata",
+            {
+                "variants": {},
+                "revisions": {},
+                "generation": None,
+                "editor_version": 0,
+            },
+        )
+
+    @staticmethod
+    def named_revision(row, metadata):
+        version = row["version"]
+        variant = metadata["revisions"].get(str(version), str(version))
+        named = metadata["variants"].get(variant, {})
+        return {
+            "id": row["id"],
+            "version": version,
+            "active": row["active"],
+            "variant_id": variant,
+            "name": named.get("name", f"Версия {variant}"),
+            "deleted": named.get("deleted", False),
+            "created_at": row["created_at"].isoformat(),
+            "profile": row["payload"],
+            "editable_profile": universal_profile(row["payload"]),
+        }
+
     def profile_data(self, connection):
         row = (
             connection.execute(
@@ -71,12 +108,15 @@ class PersonalPreferences(OwnedRepository):
             .mappings()
             .first()
         )
-        if row is None:
-            return {"version": 0, "configured": False, "profile": None}
+        metadata = self.profile_metadata(connection)
+        version = row["version"] if row else 0
         return {
-            "version": row["version"],
-            "configured": True,
-            "profile": universal_profile(row["payload"]),
+            "version": version,
+            "generation": version if metadata["generation"] is None else metadata["generation"],
+            "editor_version": metadata["editor_version"],
+            "configured": row is not None,
+            **(self.named_revision(row, metadata) if row else {}),
+            "profile": universal_profile(row["payload"]) if row else None,
         }
 
     def preferences_in(self, connection):
@@ -155,10 +195,40 @@ class PersonalPreferences(OwnedRepository):
             self.bump_sources(connection)
             return self.source_data(row)
 
+    def source_identities(self, connection):
+        return {
+            source_identity(data["kind"], data["config"])
+            for row in self.source_rows(connection)
+            if (data := self.source_data(row))["valid"]
+        }
+
+    def source_import_identities(self):
+        with self.read() as connection:
+            return self.source_identities(connection)
+
+    def add_source_set(self, specs):
+        with self.write() as connection:
+            identities = self.source_identities(connection)
+            added = []
+            for spec in specs:
+                try:
+                    identity = source_identity(spec.kind, spec.normalized())
+                except (ValueError, KeyError, TypeError) as error:
+                    raise StoreError(str(error), 422) from None
+                if identity in identities:
+                    continue
+                added.append(self.source_data(self.add_source_in(connection, spec)))
+                identities.add(identity)
+            if added:
+                self.bump_sources(connection)
+            return {"items": added}
+
     def update_source(self, source_id, expected_version, enabled=None, config=None):
         with self.write() as connection:
             row = self.active_source(connection, source_id)
             self.check_version(row["version"], expected_version)
+            if row["kind"] in AGGREGATORS and config is not None:
+                raise StoreError("Параметры встроенного источника изменять нельзя.", 422)
             data = self.source_data(row)
             spec = SourceSpec(
                 kind=row["kind"],
@@ -190,6 +260,8 @@ class PersonalPreferences(OwnedRepository):
         with self.write() as connection:
             row = self.active_source(connection, source_id)
             self.check_version(row["version"], expected_version)
+            if row["kind"] in AGGREGATORS:
+                raise StoreError("Встроенный источник можно выключить.", 409)
             self.record_source(connection, row)
             self.record_source(connection, {**row, "version": row["version"] + 1}, deleted=True)
             connection.execute(
@@ -243,57 +315,135 @@ class PersonalPreferences(OwnedRepository):
                 "Настройки изменились в другой вкладке. Загрузите актуальную версию.", 409
             )
 
-    def save_profile_in(self, connection, spec, expected_version):
-        current = self.profile_data(connection)
-        self.check_version(current["version"], expected_version)
-        connection.execute(
-            update(s.search_profiles).where(self.owned(s.search_profiles)).values(active=False)
-        )
-        connection.execute(
-            s.search_profiles.insert().values(
-                id=str(uuid4()),
-                user_id=self.user_id,
-                version=expected_version + 1,
-                active=True,
-                payload=spec.model_dump(),
-            )
-        )
-        self.touch(connection)
-        return self.profile_data(connection)
+    def profile_revisions(self, connection, metadata):
+        return [
+            self.named_revision(row, metadata)
+            for row in connection.execute(
+                select(s.search_profiles)
+                .where(self.owned(s.search_profiles))
+                .order_by(s.search_profiles.c.version)
+            ).mappings()
+        ]
 
-    def save_search_profile(self, spec, expected_version):
+    def commit_profile_metadata(self, connection, metadata, current, active_changed):
+        metadata["editor_version"] += 1
+        if active_changed:
+            metadata["generation"] = current["generation"] + 1
+        self.put_setting(connection, "search_profile_metadata", metadata)
+        self.touch(connection)
+
+    def set_active_profile(self, connection, revision_id):
+        connection.execute(
+            update(s.search_profiles)
+            .where(self.owned(s.search_profiles), s.search_profiles.c.active.is_(True))
+            .values(active=False)
+        )
+        connection.execute(
+            update(s.search_profiles)
+            .where(self.owned(s.search_profiles), s.search_profiles.c.id == revision_id)
+            .values(active=True)
+        )
+
+    @staticmethod
+    def selectable_revision(revisions, version):
+        found = next((row for row in revisions if row["version"] == version), None)
+        if found is None or found["deleted"]:
+            raise StoreError("Версия профиля недоступна.", 404)
+        return found
+
+    def save_search_profile(
+        self,
+        spec,
+        expected_version,
+        *,
+        expected_editor_version=None,
+        variant_id=None,
+        name=None,
+        create=False,
+    ):
         with self.write() as connection:
-            return self.save_profile_in(connection, spec, expected_version)
+            current = self.profile_data(connection)
+            metadata = self.profile_metadata(connection)
+            self.check_version(current["version"], expected_version)
+            if expected_editor_version is not None:
+                self.check_version(metadata["editor_version"], expected_editor_version)
+            profiles = self.profile_revisions(connection, metadata)
+            selected = next(
+                (row for row in reversed(profiles) if row["variant_id"] == variant_id), None
+            )
+            if variant_id and (selected is None or selected["deleted"]):
+                raise StoreError("Версия профиля недоступна.", 404)
+            payload = spec.model_dump()
+            if not create and current["profile"] == payload and variant_id is None:
+                return current
+            if not create and selected and selected["editable_profile"] == payload:
+                return current
+            version = (
+                connection.execute(
+                    select(func.max(s.search_profiles.c.version)).where(
+                        self.owned(s.search_profiles)
+                    )
+                ).scalar_one()
+                or 0
+            ) + 1
+            new_variant = str(version) if create or selected is None else selected["variant_id"]
+            named = metadata["variants"].get(new_variant, {})
+            metadata["revisions"][str(version)] = new_variant
+            metadata["variants"][new_variant] = {
+                "name": name or named.get("name") or f"Версия {new_variant}",
+            }
+            active = (
+                not current["configured"]
+                or expected_editor_version is None
+                or (not create and new_variant == current.get("variant_id"))
+            )
+            revision_id = str(uuid4())
+            connection.execute(
+                s.search_profiles.insert().values(
+                    id=revision_id,
+                    user_id=self.user_id,
+                    version=version,
+                    active=False,
+                    payload=payload,
+                )
+            )
+            if active:
+                self.set_active_profile(connection, revision_id)
+            self.commit_profile_metadata(connection, metadata, current, active)
+            return {
+                **self.profile_data(connection),
+                "saved_version": version,
+                "saved_variant_id": new_variant,
+                "saved_name": metadata["variants"][new_variant]["name"],
+            }
 
     def search_profile_history(self):
         with self.read() as connection:
-            return [
-                {"version": row["version"], "active": row["active"], "profile": row["payload"]}
-                for row in connection.execute(
-                    select(s.search_profiles)
-                    .where(self.owned(s.search_profiles))
-                    .order_by(s.search_profiles.c.version)
-                ).mappings()
-            ]
+            return self.profile_revisions(connection, self.profile_metadata(connection))
 
-    def apply_search_preset(self, name, expected_version, expected_sources_version):
-        presets = search_presets()
-        if name not in presets:
-            raise StoreError("Пресет не найден.", 404)
+    def change_profile_variant(self, version, action, expected_editor_version, name=None):
         with self.write() as connection:
-            self.check_version(
-                self.setting(connection, "sources_version", 0), expected_sources_version
+            current = self.profile_data(connection)
+            metadata = self.profile_metadata(connection)
+            self.check_version(metadata["editor_version"], expected_editor_version)
+            selected = self.selectable_revision(
+                self.profile_revisions(connection, metadata), version
             )
-            self.save_profile_in(
-                connection, SearchSpec.model_validate(presets[name]), expected_version
-            )
-            kinds = {row["kind"] for row in self.source_rows(connection)}
-            for kind in AGGREGATORS:
-                if kind not in kinds:
-                    self.add_source_in(connection, SourceSpec(kind=kind))
-            if set(AGGREGATORS) - kinds:
-                self.bump_sources(connection)
-            return self.preferences_in(connection)
+            variant = selected["variant_id"]
+            active_changed = False
+            if action == "activate":
+                if selected["active"]:
+                    return current
+                self.set_active_profile(connection, selected["id"])
+                active_changed = True
+            elif action == "rename":
+                metadata["variants"][variant] = {"name": name}
+            else:
+                if current.get("variant_id") == variant:
+                    raise StoreError("Сначала выберите другой вариант для поиска.", 409)
+                metadata["variants"][variant] = {"name": selected["name"], "deleted": True}
+            self.commit_profile_metadata(connection, metadata, current, active_changed)
+            return self.profile_data(connection)
 
     def source_for_check(self, source_id, expected_version):
         with self.write() as connection:
@@ -312,9 +462,9 @@ class PersonalPreferences(OwnedRepository):
     def search_configuration(self):
         state = self.preferences()
         if not state["search_profile"]["configured"]:
-            raise StoreError("Сначала настройте профиль поиска в разделе «Поиск и источники».", 409)
+            raise StoreError("Сначала настройте профиль поиска в разделе «Настройки поиска».", 409)
         rows = state["sources"]["items"]
         enabled = [row for row in rows if row["enabled"]]
         if not enabled or any(not row["valid"] for row in enabled):
-            raise StoreError("Настройте и включите источники в разделе «Поиск и источники».", 409)
+            raise StoreError("Настройте и включите источники в разделе «Настройки поиска».", 409)
         return SearchSpec.model_validate(state["search_profile"]["profile"]).runtime(), enabled

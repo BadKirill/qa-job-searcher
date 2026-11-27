@@ -39,6 +39,7 @@ class AshbySource(JobSource):
                     company=self.board.name,
                     location=location,
                     url=str(item.get("jobUrl") or item.get("applyUrl") or ""),
+                    description_quality="full",
                     description=html_to_text(
                         item.get("descriptionPlain") or item.get("descriptionHtml")
                     ),

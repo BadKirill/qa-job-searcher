@@ -6,7 +6,11 @@ from sqlalchemy.dialects.postgresql import insert
 from qa_job_bot import pg_schema as s
 from qa_job_bot.web_store import ACTIVE_STATUSES
 
-LANES = {"search": ("search",), "chat": ("chat",), "document": ("cv", "cover_letter")}
+LANES = {
+    "search": ("search", "posting_check"),
+    "chat": ("chat",),
+    "document": ("cv", "cover_letter"),
+}
 
 
 def touch_owner(connection, user_id):

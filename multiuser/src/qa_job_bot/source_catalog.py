@@ -49,9 +49,28 @@ LIMITATIONS = {
 }
 
 
+DESCRIPTIONS = {
+    "remotive": "Удалённые вакансии из открытой подборки Remotive для разных профессий.",
+    "himalayas": "Удалённые вакансии по вашим запросам. Доступны первые результаты каждой фразы.",
+    "weworkremotely": "Недавние удалённые вакансии в разработке, дизайне и поддержке.",
+    "remote_com": "Объявления компаний, нанимающих удалённо. До 100 вакансий на поисковую фразу.",
+    "hirify": "Вакансии технологических компаний. Доступны три первые страницы.",
+}
+
+
 def catalog():
     return [
-        {"kind": kind, "name": LABELS[kind], "limitations": LIMITATIONS[kind]} for kind in KINDS
+        {
+            "kind": kind,
+            "name": LABELS[kind],
+            "limitations": LIMITATIONS[kind],
+            "builtin": kind in AGGREGATORS,
+            "description": DESCRIPTIONS.get(kind),
+            "actions": ["enable", "check"]
+            if kind in AGGREGATORS
+            else ["enable", "check", "edit", "delete"],
+        }
+        for kind in KINDS
     ]
 
 

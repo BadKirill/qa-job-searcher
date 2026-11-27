@@ -162,7 +162,7 @@ Browser E2E: два приглашённых аккаунта в разных к
 Фактические результаты полного gate фиксируются в [verification.md](verification.md).
 
 Личные источники и профиль поиска описаны в [personal-search-settings.md](personal-search-settings.md).
-Текущая ревизия хранения — `0007_shared_runtime`.
+Текущая ревизия хранения — `0008_posting_tasks`.
 Поиск и история: [personal-search-runs.md](personal-search-runs.md).
 Общий worker и scheduler: [shared-runtime.md](shared-runtime.md).
 Настройка через сайт, изменение имени и сводка кабинета:

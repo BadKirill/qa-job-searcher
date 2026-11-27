@@ -162,7 +162,7 @@ export function TaskStatus({
           )}
           <span className="task-label">
             {isPending(task.status) && <span className="spinner" />}
-            {taskLabel(task.status)}
+            {taskLabel(task.status, task.kind)}
           </span>
         </div>
       </div>

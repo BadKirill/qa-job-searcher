@@ -41,6 +41,7 @@ class LeverSource(JobSource):
                     company=self.board.name,
                     location=location,
                     url=str(item.get("hostedUrl") or item.get("applyUrl") or ""),
+                    description_quality="full",
                     description=self._description(item),
                     remote=workplace == "remote" or "remote" in location.casefold(),
                     workplace_type=workplace,

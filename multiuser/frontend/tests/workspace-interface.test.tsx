@@ -46,7 +46,7 @@ it("guides a new account through personal criteria, sources and CV while showing
   render(<WorkspaceStatus revision={0} onNavigate={navigate} />);
   await screen.findByRole("heading", { name: "Подготовьте личный кабинет" });
   expect(screen.getByLabelText("Личная очередь")).toHaveTextContent(
-    "В очереди: 2Выполняется: 1Требуют внимания: 1",
+    "Заданий в очереди: 2Заданий выполняется: 1Требуют внимания: 1",
   );
   expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
   expect(screen.getByText(/Личный лимит OpenAI исчерпан/)).toBeInTheDocument();
@@ -174,7 +174,7 @@ it("keeps unsaved search criteria while switching separate pages and only shows 
     ),
   );
   render(<SearchSettings section="criteria" />);
-  await screen.findByRole("button", { name: "Сохранить профиль поиска" });
+  await screen.findByRole("button", { name: /^Сохранить$/ });
   expect(
     screen.queryByLabelText("Учитывать дополнительные QA-названия"),
   ).not.toBeInTheDocument();
@@ -190,7 +190,7 @@ it("keeps unsaved search criteria while switching separate pages and only shows 
   expect(
     screen.queryByLabelText("Названия ролей и синонимы"),
   ).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "Что ищу" }));
+  await userEvent.click(screen.getByRole("button", { name: "Критерии" }));
   expect(screen.getByLabelText("Названия ролей и синонимы")).toHaveValue(
     "backend engineer, architect",
   );
@@ -202,7 +202,7 @@ it("keeps unsaved search criteria while switching separate pages and only shows 
     screen.getByRole("button", { name: "Все настройки поиска" }),
   );
   expect(
-    screen.getByRole("heading", { name: "Поиск и источники" }),
+    screen.getByRole("heading", { name: "Настройки поиска" }),
   ).toBeInTheDocument();
 });
 

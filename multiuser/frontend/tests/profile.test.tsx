@@ -157,11 +157,11 @@ it("rejects unsupported, empty and oversized input and handles cancelled file se
     "Выберите файл PDF или DOCX",
   );
   fireEvent.change(input, { target: { files: [new File([], "empty.pdf")] } });
-  expect(screen.getByRole("alert")).toHaveTextContent("непустым");
+  expect(screen.getByRole("alert")).toHaveTextContent("Файл пуст");
   const huge = new File(["x"], "huge.pdf");
   Object.defineProperty(huge, "size", { value: 10 * 1024 * 1024 + 1 });
   fireEvent.change(input, { target: { files: [huge] } });
-  expect(screen.getByRole("alert")).toHaveTextContent("не больше 10 МБ");
+  expect(screen.getByRole("alert")).toHaveTextContent("10 МБ");
   const bound = new File(["x"], "at-limit.PDF");
   Object.defineProperty(bound, "size", { value: 10 * 1024 * 1024 });
   fireEvent.change(input, { target: { files: [bound] } });

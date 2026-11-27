@@ -130,6 +130,6 @@ class PersonalSearchPipeline:
         return await asyncio.gather(*(collect(source) for source in inputs["sources"]))
 
 
-def personal_match(job, source, profile):
+def personal_match(job, source, profile, *, day=None):
     local = replace(job, tags=(*job.tags, *source["config"].get("tags", [])))
-    return match_job(local, profile)
+    return match_job(local, profile, day=day)

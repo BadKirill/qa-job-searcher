@@ -41,14 +41,19 @@ export function Profile({
   }
   async function upload(file?: File) {
     if (!file) return;
+    if (input.current) input.current.value = "";
     setError("");
     setNotice("");
     if (!/\.(pdf|docx)$/i.test(file.name)) {
       setError("Выберите файл PDF или DOCX.");
       return;
     }
-    if (file.size === 0 || file.size > 10 * 1024 * 1024) {
-      setError("Файл должен быть непустым и не больше 10 МБ.");
+    if (!file.size) {
+      setError("Файл пуст. Выберите PDF или DOCX с текстом.");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setError("Максимальный размер шаблона — 10 МБ.");
       return;
     }
     const body = new FormData();
@@ -217,6 +222,7 @@ export function Profile({
               ? "Изменить эталонный шаблон"
               : "Задать эталонный шаблон"}
         </button>
+        <small>PDF или DOCX, до 10 МБ</small>
       </section>
       <p className="template-format-note muted small">
         Поддерживаются базовые стили одноколоночного CV: шрифт, поля и размер
